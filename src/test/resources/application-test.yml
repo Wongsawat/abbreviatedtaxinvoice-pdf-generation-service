@@ -1,0 +1,76 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+  flyway:
+    enabled: false
+
+app:
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      command-group-id: test-command-group
+      compensation-group-id: test-compensation-group
+      break-on-first-error: false
+      max-poll-records: 10
+      consumers-count: 1
+    topics:
+      saga-command-abbreviated-tax-invoice-pdf: saga.command.abbreviated-tax-invoice-pdf
+      saga-compensation-abbreviated-tax-invoice-pdf: saga.compensation.abbreviated-tax-invoice-pdf
+      pdf-generated-abbreviated-tax-invoice: pdf.generated.abbreviated-tax-invoice
+      dlq: pdf.generation.abbreviated-tax-invoice.dlq
+  minio:
+    endpoint: http://localhost:9000
+    access-key: minioadmin
+    secret-key: minioadmin
+    bucket-name: abbreviatedtaxinvoices
+    region: us-east-1
+    base-url: http://localhost:9000/abbreviatedtaxinvoices
+    path-style-access: true
+    cleanup:
+      enabled: false
+      cron: "0 0 2 * * ?"
+  pdf:
+    icc-profile-path: icc/sRGB.icc
+    generation:
+      max-retries: 3
+      max-concurrent-renders: 3
+      max-pdf-size-bytes: 52428800
+  abbreviatedtaxinvoice:
+    default-vat-rate: 7
+  rest-client:
+    connect-timeout: 5000
+    read-timeout: 10000
+    allowed-hosts: localhost
+  fonts:
+    health-check:
+      enabled: false
+      fail-on-error: false
+
+eureka:
+  client:
+    enabled: false
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      minio:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+      signedXmlFetch:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 60s
+        permitted-number-of-calls-in-half-open-state: 3
+        slow-call-rate-threshold: 50
+        slow-call-duration-threshold: 3s
