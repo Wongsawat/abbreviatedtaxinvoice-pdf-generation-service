@@ -41,4 +41,12 @@ public class AbbreviatedTaxInvoicePdfGeneratedEvent extends TraceEvent {
     public String getEventType() {
         return EVENT_TYPE;
     }
+
+    public static AbbreviatedTaxInvoicePdfGeneratedEvent success(
+            String documentId, String abbreviatedTaxInvoiceId, String abbreviatedTaxInvoiceNumber,
+            String documentUrl, long fileSize) {
+        return new AbbreviatedTaxInvoicePdfGeneratedEvent(
+                abbreviatedTaxInvoiceId, documentId, abbreviatedTaxInvoiceNumber,
+                documentUrl, fileSize, true, abbreviatedTaxInvoiceId);
+    }
 }

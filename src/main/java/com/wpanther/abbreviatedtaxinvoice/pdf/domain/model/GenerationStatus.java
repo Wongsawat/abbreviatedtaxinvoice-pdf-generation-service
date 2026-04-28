@@ -4,5 +4,6 @@ public enum GenerationStatus {
     PENDING,
     GENERATING,
     COMPLETED,
-    FAILED
+    FAILED,
+    COMPENSATED
 }

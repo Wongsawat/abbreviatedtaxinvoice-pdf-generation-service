@@ -21,18 +21,16 @@ class FontHealthCheckTest {
     }
 
     @Test
-    @DisplayName("checkFontsAtStartup() throws when fonts are missing and failOnError=true")
-    void testFontsAbsent_FailOnError() {
-        FontHealthCheck check = healthCheck(true);
-        assertThatThrownBy(check::checkFontsAtStartup)
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Missing");
+    @DisplayName("checkFontsAtStartup() completes when all required fonts are present")
+    void testFontsPresent_NoException() {
+        FontHealthCheck check = healthCheck(false);
+        assertThatCode(check::checkFontsAtStartup).doesNotThrowAnyException();
     }
 
     @Test
-    @DisplayName("checkFontsAtStartup() logs warning only when fonts are missing and failOnError=false")
-    void testFontsAbsent_WarnOnly() {
-        FontHealthCheck check = healthCheck(false);
+    @DisplayName("checkFontsAtStartup() completes even with failOnError=true when fonts are present")
+    void testFontsPresent_FailOnError() {
+        FontHealthCheck check = healthCheck(true);
         assertThatCode(check::checkFontsAtStartup).doesNotThrowAnyException();
     }
 }

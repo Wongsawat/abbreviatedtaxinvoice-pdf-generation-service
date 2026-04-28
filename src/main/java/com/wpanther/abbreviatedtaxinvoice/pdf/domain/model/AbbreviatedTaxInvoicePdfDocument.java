@@ -63,6 +63,11 @@ public class AbbreviatedTaxInvoicePdfDocument {
         this.updatedAt = Instant.now();
     }
 
+    public void markCompensated() {
+        this.status = GenerationStatus.COMPENSATED;
+        this.updatedAt = Instant.now();
+    }
+
     public void incrementRetry() {
         this.retryCount++;
         this.updatedAt = Instant.now();
