@@ -1,0 +1,141 @@
+server:
+  port: 8096
+
+spring:
+  application:
+    name: abbreviatedtaxinvoice-pdf-generation-service
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:abbreviatedtaxinvoicepdf_db}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+# Apache Camel
+camel:
+  springboot:
+    name: abbreviatedtaxinvoice-pdf-generation-camel
+    main-run-controller: true
+  dataformat:
+    jackson:
+      auto-discover-object-mapper: true
+
+# Application-specific configuration
+app:
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
+    consumer:
+      command-group-id: ${KAFKA_COMMAND_GROUP_ID:abbreviatedtaxinvoice-pdf-generation-command}
+      compensation-group-id: ${KAFKA_COMPENSATION_GROUP_ID:abbreviatedtaxinvoice-pdf-generation-compensation}
+      break-on-first-error: ${KAFKA_BREAK_ON_FIRST_ERROR:true}
+      max-poll-records: ${KAFKA_MAX_POLL_RECORDS:100}
+      consumers-count: ${KAFKA_CONSUMERS_COUNT:3}
+    topics:
+      saga-command-abbreviated-tax-invoice-pdf: saga.command.abbreviated-tax-invoice-pdf
+      saga-compensation-abbreviated-tax-invoice-pdf: saga.compensation.abbreviated-tax-invoice-pdf
+      pdf-generated-abbreviated-tax-invoice: pdf.generated.abbreviated-tax-invoice
+      dlq: pdf.generation.abbreviated-tax-invoice.dlq
+  minio:
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    access-key: ${MINIO_ACCESS_KEY:minioadmin}
+    secret-key: ${MINIO_SECRET_KEY:minioadmin}
+    bucket-name: ${MINIO_BUCKET_NAME:abbreviatedtaxinvoices}
+    region: ${MINIO_REGION:us-east-1}
+    base-url: ${MINIO_BASE_URL:http://localhost:9000/abbreviatedtaxinvoices}
+    path-style-access: ${MINIO_PATH_STYLE_ACCESS:true}
+    cleanup:
+      enabled: ${MINIO_CLEANUP_ENABLED:false}
+      cron: ${MINIO_CLEANUP_CRON:0 0 2 * * ?}
+  pdf:
+    icc-profile-path: ${PDF_ICC_PROFILE_PATH:icc/sRGB.icc}
+    generation:
+      max-retries: ${PDF_GENERATION_MAX_RETRIES:3}
+      max-concurrent-renders: ${PDF_MAX_CONCURRENT_RENDERS:3}
+      max-pdf-size-bytes: ${PDF_MAX_SIZE_BYTES:52428800}
+  abbreviatedtaxinvoice:
+    default-vat-rate: ${ABBREVIATED_TAX_INVOICE_DEFAULT_VAT_RATE:7}
+  rest-client:
+    connect-timeout: ${REST_CLIENT_CONNECT_TIMEOUT:5000}
+    read-timeout: ${REST_CLIENT_READ_TIMEOUT:30000}
+    allowed-hosts: ${REST_CLIENT_ALLOWED_HOSTS:localhost,127.0.0.1}
+  document-storage:
+    base-url: ${DOCUMENT_STORAGE_URL:http://localhost:8084}
+  fonts:
+    health-check:
+      enabled: ${FONT_HEALTH_CHECK_ENABLED:true}
+      fail-on-error: ${FONT_HEALTH_CHECK_FAIL_ON_ERROR:true}
+
+# Eureka client (optional for local development)
+eureka:
+  client:
+    enabled: ${EUREKA_ENABLED:false}
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
+  instance:
+    prefer-ip-address: true
+
+# Actuator endpoints
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+  health:
+    circuitbreakers:
+      enabled: true
+
+# Resilience4j circuit breaker configuration
+resilience4j:
+  circuitbreaker:
+    instances:
+      minio:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+      signedXmlFetch:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 60s
+        permitted-number-of-calls-in-half-open-state: 3
+        slow-call-rate-threshold: 50
+        slow-call-duration-threshold: 3s
+  retry:
+    instances:
+      minio:
+        max-attempts: 3
+        wait-duration: 2s
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+
+# Logging configuration
+logging:
+  level:
+    root: INFO
+    com.wpanther.abbreviatedtaxinvoice: DEBUG
+    com.wpanther.saga: INFO
+    org.apache.camel: INFO
+    org.springframework.kafka: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
