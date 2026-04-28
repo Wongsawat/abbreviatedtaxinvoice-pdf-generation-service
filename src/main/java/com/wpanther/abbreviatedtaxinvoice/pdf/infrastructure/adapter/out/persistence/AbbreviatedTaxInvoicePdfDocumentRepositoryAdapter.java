@@ -2,6 +2,8 @@ package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.persis
 
 import com.wpanther.abbreviatedtaxinvoice.pdf.domain.model.AbbreviatedTaxInvoicePdfDocument;
 import com.wpanther.abbreviatedtaxinvoice.pdf.domain.repository.AbbreviatedTaxInvoicePdfDocumentRepository;
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -36,6 +38,16 @@ public class AbbreviatedTaxInvoicePdfDocumentRepositoryAdapter implements Abbrev
     @Override
     public void flush() {
         jpaRepository.flush();
+    }
+
+    @Override
+    public List<String> findOrphanedS3Keys(LocalDateTime cutoff) {
+        return jpaRepository.findOrphanedS3Keys(cutoff);
+    }
+
+    @Override
+    public void markS3KeyDeleted(String s3Key) {
+        jpaRepository.markS3KeyDeleted(s3Key);
     }
 
     private AbbreviatedTaxInvoicePdfDocumentEntity toEntity(AbbreviatedTaxInvoicePdfDocument doc) {
