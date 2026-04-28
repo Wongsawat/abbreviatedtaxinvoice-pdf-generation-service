@@ -23,9 +23,9 @@ import java.util.Map;
 public class AbbreviatedTaxInvoicePdfGenerationServiceImpl implements AbbreviatedTaxInvoicePdfGenerationService {
 
     private static final String RSM_NS =
-        "urn:oasis:names:specification:ubl:schema:xsd:AbbreviatedTaxInvoice-2";
+        "urn:etda:uncefact:data:standard:AbbreviatedTaxInvoice_CrossIndustryInvoice:2";
     private static final String RAM_NS =
-        "urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100";
+        "urn:etda:uncefact:data:standard:AbbreviatedTaxInvoice_ReusableAggregateBusinessInformationEntity:2";
     private static final String GRAND_TOTAL_XPATH =
         "/rsm:AbbreviatedTaxInvoice_CrossIndustryInvoice" +
         "/rsm:SupplyChainTradeTransaction" +
