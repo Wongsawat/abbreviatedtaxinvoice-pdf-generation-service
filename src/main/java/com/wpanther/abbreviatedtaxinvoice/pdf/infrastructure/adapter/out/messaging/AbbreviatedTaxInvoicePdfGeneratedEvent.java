@@ -1,45 +1,44 @@
 package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.messaging;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.wpanther.saga.domain.model.TraceEvent;
+import lombok.Getter;
+
 import java.util.UUID;
 
-public class AbbreviatedTaxInvoicePdfGeneratedEvent {
-    private String eventId;
-    private String eventType;
-    private int version;
-    private String documentId;
-    private String abbreviatedTaxInvoiceId;
-    private String abbreviatedTaxInvoiceNumber;
-    private String documentUrl;
-    private long fileSize;
-    private boolean xmlEmbedded;
-    private String correlationId;
+@Getter
+public class AbbreviatedTaxInvoicePdfGeneratedEvent extends TraceEvent {
 
-    public AbbreviatedTaxInvoicePdfGeneratedEvent() {
-        this.eventId = UUID.randomUUID().toString();
-        this.eventType = "pdf.generated.abbreviated-tax-invoice";
-        this.version = 1;
-    }
+    private static final String EVENT_TYPE = "pdf.generated.abbreviated-tax-invoice";
+    private static final String SOURCE = "abbreviatedtaxinvoice-pdf-generation-service";
+    private static final String TRACE_TYPE = "PDF_GENERATED";
 
-    public AbbreviatedTaxInvoicePdfGeneratedEvent(String sagaId, String documentId, String abbreviatedTaxInvoiceNumber,
-                                                   String documentUrl, long fileSize, boolean xmlEmbedded, String correlationId) {
-        this();
+    @JsonProperty("documentId") private final String documentId;
+    @JsonProperty("abbreviatedTaxInvoiceId") private final String abbreviatedTaxInvoiceId;
+    @JsonProperty("abbreviatedTaxInvoiceNumber") private final String abbreviatedTaxInvoiceNumber;
+    @JsonProperty("documentUrl") private final String documentUrl;
+    @JsonProperty("fileSize") private final long fileSize;
+    @JsonProperty("xmlEmbedded") private final boolean xmlEmbedded;
+
+    public AbbreviatedTaxInvoicePdfGeneratedEvent(
+            @JsonProperty("sagaId") String sagaId,
+            @JsonProperty("documentId") String documentId,
+            @JsonProperty("abbreviatedTaxInvoiceNumber") String abbreviatedTaxInvoiceNumber,
+            @JsonProperty("documentUrl") String documentUrl,
+            @JsonProperty("fileSize") long fileSize,
+            @JsonProperty("xmlEmbedded") boolean xmlEmbedded,
+            @JsonProperty("correlationId") String correlationId) {
+        super(sagaId, correlationId, SOURCE, TRACE_TYPE, null);
         this.documentId = documentId;
         this.abbreviatedTaxInvoiceId = sagaId;
         this.abbreviatedTaxInvoiceNumber = abbreviatedTaxInvoiceNumber;
         this.documentUrl = documentUrl;
         this.fileSize = fileSize;
         this.xmlEmbedded = xmlEmbedded;
-        this.correlationId = correlationId;
     }
 
-    public String getEventId() { return eventId; }
-    public String getEventType() { return eventType; }
-    public int getVersion() { return version; }
-    public String getDocumentId() { return documentId; }
-    public String getAbbreviatedTaxInvoiceId() { return abbreviatedTaxInvoiceId; }
-    public String getAbbreviatedTaxInvoiceNumber() { return abbreviatedTaxInvoiceNumber; }
-    public String getDocumentUrl() { return documentUrl; }
-    public long getFileSize() { return fileSize; }
-    public boolean isXmlEmbedded() { return xmlEmbedded; }
-    public String getCorrelationId() { return correlationId; }
+    @Override
+    public String getEventType() {
+        return EVENT_TYPE;
+    }
 }

@@ -1,6 +1,5 @@
 package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.messaging;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wpanther.saga.domain.enums.SagaStep;
 import com.wpanther.saga.infrastructure.outbox.OutboxService;
@@ -40,8 +39,8 @@ public class SagaReplyPublisher {
                     "{}"
             );
             log.info("Published saga reply: {} for saga: {}", event.getStatus(), sagaId);
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException("Failed to serialize AbbreviatedTaxInvoicePdfReplyEvent", e);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to publish AbbreviatedTaxInvoicePdfReplyEvent", e);
         }
     }
 }

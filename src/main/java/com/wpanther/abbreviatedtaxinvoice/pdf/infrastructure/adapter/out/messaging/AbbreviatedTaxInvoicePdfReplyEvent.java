@@ -1,62 +1,56 @@
 package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.messaging;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.wpanther.saga.domain.enums.ReplyStatus;
 import com.wpanther.saga.domain.enums.SagaStep;
-import java.util.UUID;
+import com.wpanther.saga.domain.model.SagaReply;
+import lombok.Getter;
 
-public class AbbreviatedTaxInvoicePdfReplyEvent {
-    private String eventId;
-    private String sagaId;
-    private SagaStep sagaStep;
-    private String correlationId;
-    private String status;
-    private String pdfUrl;
-    private Long pdfSize;
-    private String errorMessage;
+@Getter
+public class AbbreviatedTaxInvoicePdfReplyEvent extends SagaReply {
 
-    public AbbreviatedTaxInvoicePdfReplyEvent() {
-        this.eventId = UUID.randomUUID().toString();
+    private final String pdfUrl;
+    private final Long pdfSize;
+    private final String errorMessage;
+
+    public AbbreviatedTaxInvoicePdfReplyEvent(
+            @JsonProperty("sagaId") String sagaId,
+            @JsonProperty("sagaStep") SagaStep sagaStep,
+            @JsonProperty("correlationId") String correlationId,
+            @JsonProperty("replyStatus") ReplyStatus replyStatus,
+            @JsonProperty("pdfUrl") String pdfUrl,
+            @JsonProperty("pdfSize") Long pdfSize,
+            @JsonProperty("errorMessage") String errorMessage) {
+        super(sagaId, sagaStep, correlationId, replyStatus);
+        this.pdfUrl = pdfUrl;
+        this.pdfSize = pdfSize;
+        this.errorMessage = errorMessage;
     }
 
-    public static AbbreviatedTaxInvoicePdfReplyEvent success(String sagaId, SagaStep sagaStep, String correlationId, String pdfUrl, Long pdfSize) {
-        AbbreviatedTaxInvoicePdfReplyEvent e = new AbbreviatedTaxInvoicePdfReplyEvent();
-        e.sagaId = sagaId;
-        e.sagaStep = sagaStep;
-        e.correlationId = correlationId;
-        e.status = "SUCCESS";
-        e.pdfUrl = pdfUrl;
-        e.pdfSize = pdfSize;
-        return e;
+    public static AbbreviatedTaxInvoicePdfReplyEvent success(
+            String sagaId, SagaStep sagaStep, String correlationId, String pdfUrl, Long pdfSize) {
+        return new AbbreviatedTaxInvoicePdfReplyEvent(
+                sagaId, sagaStep, correlationId, ReplyStatus.SUCCESS, pdfUrl, pdfSize, null);
     }
 
-    public static AbbreviatedTaxInvoicePdfReplyEvent failure(String sagaId, SagaStep sagaStep, String correlationId, String errorMessage) {
-        AbbreviatedTaxInvoicePdfReplyEvent e = new AbbreviatedTaxInvoicePdfReplyEvent();
-        e.sagaId = sagaId;
-        e.sagaStep = sagaStep;
-        e.correlationId = correlationId;
-        e.status = "FAILURE";
-        e.errorMessage = errorMessage;
-        return e;
+    public static AbbreviatedTaxInvoicePdfReplyEvent failure(
+            String sagaId, SagaStep sagaStep, String correlationId, String errorMessage) {
+        return new AbbreviatedTaxInvoicePdfReplyEvent(
+                sagaId, sagaStep, correlationId, ReplyStatus.FAILURE, null, null, errorMessage);
     }
 
-    public static AbbreviatedTaxInvoicePdfReplyEvent compensated(String sagaId, SagaStep sagaStep, String correlationId) {
-        AbbreviatedTaxInvoicePdfReplyEvent e = new AbbreviatedTaxInvoicePdfReplyEvent();
-        e.sagaId = sagaId;
-        e.sagaStep = sagaStep;
-        e.correlationId = correlationId;
-        e.status = "COMPENSATED";
-        return e;
+    public static AbbreviatedTaxInvoicePdfReplyEvent compensated(
+            String sagaId, SagaStep sagaStep, String correlationId) {
+        return new AbbreviatedTaxInvoicePdfReplyEvent(
+                sagaId, sagaStep, correlationId, ReplyStatus.COMPENSATED, null, null, null);
     }
 
-    public boolean isSuccess() { return "SUCCESS".equals(status); }
-    public boolean isFailure() { return "FAILURE".equals(status); }
-    public boolean isCompensated() { return "COMPENSATED".equals(status); }
+    @Override
+    public String getEventType() {
+        return "saga.reply.abbreviated-tax-invoice-pdf";
+    }
 
-    public String getEventId() { return eventId; }
-    public String getSagaId() { return sagaId; }
-    public SagaStep getSagaStep() { return sagaStep; }
-    public String getCorrelationId() { return correlationId; }
-    public String getStatus() { return status; }
-    public String getPdfUrl() { return pdfUrl; }
-    public Long getPdfSize() { return pdfSize; }
-    public String getErrorMessage() { return errorMessage; }
+    public boolean isSuccess() { return ReplyStatus.SUCCESS.equals(getStatus()); }
+    public boolean isFailure() { return ReplyStatus.FAILURE.equals(getStatus()); }
+    public boolean isCompensated() { return ReplyStatus.COMPENSATED.equals(getStatus()); }
 }

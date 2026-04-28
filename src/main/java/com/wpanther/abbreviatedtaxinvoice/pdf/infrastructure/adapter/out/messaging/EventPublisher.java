@@ -1,6 +1,5 @@
 package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.messaging;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wpanther.saga.infrastructure.outbox.OutboxService;
 import org.slf4j.Logger;
@@ -30,8 +29,8 @@ public class EventPublisher {
                     headers
             );
             log.info("Published pdf.generated.abbreviated-tax-invoice event for document: {}", event.getDocumentId());
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException("Failed to serialize AbbreviatedTaxInvoicePdfGeneratedEvent", e);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to publish AbbreviatedTaxInvoicePdfGeneratedEvent", e);
         }
     }
 }
