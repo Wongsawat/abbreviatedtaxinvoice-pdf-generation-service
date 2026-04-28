@@ -1094,4 +1094,791 @@ git commit -m "feat: add AbbreviatedTaxInvoicePdfDocument aggregate root and dom
 
 ---
 
+## Task 5: Application Ports + Use Case Interfaces
+
+**Files:**
+- Create: `src/main/java/com/wpanther/abbreviatedtaxinvoice/pdf/application/port/out/PdfEventPort.java`
+- Create: `src/main/java/com/wpanther/abbreviatedtaxinvoice/pdf/application/port/out/PdfStoragePort.java`
+- Create: `src/main/java/com/wpanther/abbreviatedtaxinvoice/pdf/application/port/out/SagaReplyPort.java`
+- Create: `src/main/java/com/wpanther/abbreviatedtaxinvoice/pdf/application/port/out/SignedXmlFetchPort.java`
+- Create: `src/main/java/com/wpanther/abbreviatedtaxinvoice/pdf/application/usecase/ProcessAbbreviatedTaxInvoicePdfUseCase.java`
+- Create: `src/main/java/com/wpanther/abbreviatedtaxinvoice/pdf/application/usecase/CompensateAbbreviatedTaxInvoicePdfUseCase.java`
+
+These are all pure interfaces — no tests required (the implementations are tested separately).
+
+- [ ] **Step 1: Create `PdfEventPort`**
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.application.port.out;
+
+import com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.messaging.AbbreviatedTaxInvoicePdfGeneratedEvent;
+
+public interface PdfEventPort {
+    void publishPdfGenerated(AbbreviatedTaxInvoicePdfGeneratedEvent event);
+}
+```
+
+- [ ] **Step 2: Create `PdfStoragePort`**
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.application.port.out;
+
+public interface PdfStoragePort {
+    /** Upload PDF bytes and return the S3 key. */
+    String store(String abbreviatedTaxInvoiceNumber, byte[] pdfBytes);
+    /** Delete a stored PDF by S3 key (best-effort). */
+    void delete(String s3Key);
+    /** Resolve a full URL from an S3 key. */
+    String resolveUrl(String s3Key);
+}
+```
+
+- [ ] **Step 3: Create `SagaReplyPort`**
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.application.port.out;
+
+import com.wpanther.saga.domain.enums.SagaStep;
+
+public interface SagaReplyPort {
+    void publishSuccess(String sagaId, SagaStep sagaStep, String correlationId,
+                        String pdfUrl, long pdfSize);
+    void publishFailure(String sagaId, SagaStep sagaStep, String correlationId,
+                        String errorMessage);
+    void publishCompensated(String sagaId, SagaStep sagaStep, String correlationId);
+}
+```
+
+- [ ] **Step 4: Create `SignedXmlFetchPort`**
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.application.port.out;
+
+public interface SignedXmlFetchPort {
+
+    /**
+     * Download the signed XML content from the given URL.
+     *
+     * @param url URL pointing to the signed XML document
+     * @return non-blank XML content
+     * @throws SignedXmlFetchException if the HTTP request fails or the response is blank
+     */
+    String fetch(String url);
+
+    class SignedXmlFetchException extends RuntimeException {
+        public SignedXmlFetchException(String message) { super(message); }
+        public SignedXmlFetchException(String message, Throwable cause) { super(message, cause); }
+    }
+}
+```
+
+- [ ] **Step 5: Create use case interfaces**
+
+Create `ProcessAbbreviatedTaxInvoicePdfUseCase.java`:
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.application.usecase;
+
+import com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.in.kafka.KafkaAbbreviatedTaxInvoiceProcessCommand;
+
+public interface ProcessAbbreviatedTaxInvoicePdfUseCase {
+    void handle(KafkaAbbreviatedTaxInvoiceProcessCommand command);
+}
+```
+
+Create `CompensateAbbreviatedTaxInvoicePdfUseCase.java`:
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.application.usecase;
+
+import com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.in.kafka.KafkaAbbreviatedTaxInvoiceCompensateCommand;
+
+public interface CompensateAbbreviatedTaxInvoicePdfUseCase {
+    void handle(KafkaAbbreviatedTaxInvoiceCompensateCommand command);
+}
+```
+
+- [ ] **Step 6: Verify the project still compiles**
+
+```bash
+mvn compile -DskipTests 2>&1 | tail -5
+```
+
+Expected: `BUILD SUCCESS`.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/
+git commit -m "feat: add application port interfaces and use case contracts"
+```
+
+---
+
+## Task 6: Infrastructure Persistence — Entity, JPA Repository, Repository Adapter
+
+**Files:**
+- Create: `src/main/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/adapter/out/persistence/AbbreviatedTaxInvoicePdfDocumentEntity.java`
+- Create: `src/main/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/adapter/out/persistence/JpaAbbreviatedTaxInvoicePdfDocumentRepository.java`
+- Create: `src/main/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/adapter/out/persistence/AbbreviatedTaxInvoicePdfDocumentRepositoryAdapter.java`
+- Test: `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/adapter/out/persistence/JpaAbbreviatedTaxInvoicePdfDocumentRepositoryImplTest.java`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/adapter/out/persistence/JpaAbbreviatedTaxInvoicePdfDocumentRepositoryImplTest.java`:
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.persistence;
+
+import com.wpanther.abbreviatedtaxinvoice.pdf.domain.model.AbbreviatedTaxInvoicePdfDocument;
+import com.wpanther.abbreviatedtaxinvoice.pdf.domain.model.GenerationStatus;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.time.LocalDateTime;
+import java.util.Optional;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
+@ExtendWith(MockitoExtension.class)
+@DisplayName("AbbreviatedTaxInvoicePdfDocumentRepositoryAdapter Unit Tests")
+class JpaAbbreviatedTaxInvoicePdfDocumentRepositoryImplTest {
+
+    @Mock
+    private JpaAbbreviatedTaxInvoicePdfDocumentRepository jpaRepository;
+
+    private AbbreviatedTaxInvoicePdfDocumentRepositoryAdapter repository;
+
+    private UUID id;
+    private AbbreviatedTaxInvoicePdfDocument domain;
+
+    @BeforeEach
+    void setUp() {
+        repository = new AbbreviatedTaxInvoicePdfDocumentRepositoryAdapter(jpaRepository);
+        id = UUID.randomUUID();
+        LocalDateTime now = LocalDateTime.now();
+
+        domain = AbbreviatedTaxInvoicePdfDocument.builder()
+                .id(id)
+                .abbreviatedTaxInvoiceId("ati-123")
+                .abbreviatedTaxInvoiceNumber("423-612")
+                .documentPath("2026/04/28/abbreviated-tax-invoice-423-612-abc.pdf")
+                .documentUrl("http://localhost:9000/abbreviatedtaxinvoices/2026/04/28/abbreviated-tax-invoice-423-612-abc.pdf")
+                .fileSize(98765L)
+                .mimeType("application/pdf")
+                .xmlEmbedded(true)
+                .status(GenerationStatus.COMPLETED)
+                .retryCount(1)
+                .createdAt(now)
+                .completedAt(now)
+                .build();
+    }
+
+    @Test
+    @DisplayName("save() maps domain to entity and back")
+    void testSave_roundTrip() {
+        AbbreviatedTaxInvoicePdfDocumentEntity entity = AbbreviatedTaxInvoicePdfDocumentEntity.builder()
+                .id(id)
+                .abbreviatedTaxInvoiceId("ati-123")
+                .abbreviatedTaxInvoiceNumber("423-612")
+                .documentPath("2026/04/28/abbreviated-tax-invoice-423-612-abc.pdf")
+                .documentUrl("http://localhost:9000/abbreviatedtaxinvoices/2026/04/28/abbreviated-tax-invoice-423-612-abc.pdf")
+                .fileSize(98765L)
+                .mimeType("application/pdf")
+                .xmlEmbedded(true)
+                .status(GenerationStatus.COMPLETED)
+                .retryCount(1)
+                .createdAt(LocalDateTime.now())
+                .completedAt(LocalDateTime.now())
+                .build();
+        when(jpaRepository.save(any())).thenReturn(entity);
+
+        AbbreviatedTaxInvoicePdfDocument result = repository.save(domain);
+
+        verify(jpaRepository).save(any(AbbreviatedTaxInvoicePdfDocumentEntity.class));
+        assertThat(result.getAbbreviatedTaxInvoiceId()).isEqualTo("ati-123");
+        assertThat(result.getAbbreviatedTaxInvoiceNumber()).isEqualTo("423-612");
+        assertThat(result.getFileSize()).isEqualTo(98765L);
+        assertThat(result.isXmlEmbedded()).isTrue();
+        assertThat(result.getStatus()).isEqualTo(GenerationStatus.COMPLETED);
+        assertThat(result.getRetryCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("findById() returns mapped domain when found")
+    void testFindById_found() {
+        AbbreviatedTaxInvoicePdfDocumentEntity entity = AbbreviatedTaxInvoicePdfDocumentEntity.builder()
+                .id(id)
+                .abbreviatedTaxInvoiceId("ati-123")
+                .abbreviatedTaxInvoiceNumber("423-612")
+                .status(GenerationStatus.COMPLETED)
+                .fileSize(98765L)
+                .xmlEmbedded(true)
+                .retryCount(0)
+                .mimeType("application/pdf")
+                .build();
+        when(jpaRepository.findById(id)).thenReturn(Optional.of(entity));
+
+        Optional<AbbreviatedTaxInvoicePdfDocument> result = repository.findById(id);
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getAbbreviatedTaxInvoiceId()).isEqualTo("ati-123");
+    }
+
+    @Test
+    @DisplayName("findById() returns empty when not found")
+    void testFindById_notFound() {
+        when(jpaRepository.findById(id)).thenReturn(Optional.empty());
+        assertThat(repository.findById(id)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("findByAbbreviatedTaxInvoiceId() returns mapped domain when found")
+    void testFindByAbbreviatedTaxInvoiceId_found() {
+        AbbreviatedTaxInvoicePdfDocumentEntity entity = AbbreviatedTaxInvoicePdfDocumentEntity.builder()
+                .id(id)
+                .abbreviatedTaxInvoiceId("ati-123")
+                .abbreviatedTaxInvoiceNumber("423-612")
+                .status(GenerationStatus.PENDING)
+                .xmlEmbedded(false)
+                .retryCount(0)
+                .mimeType("application/pdf")
+                .build();
+        when(jpaRepository.findByAbbreviatedTaxInvoiceId("ati-123")).thenReturn(Optional.of(entity));
+
+        Optional<AbbreviatedTaxInvoicePdfDocument> result = repository.findByAbbreviatedTaxInvoiceId("ati-123");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getAbbreviatedTaxInvoiceNumber()).isEqualTo("423-612");
+    }
+
+    @Test
+    @DisplayName("findByAbbreviatedTaxInvoiceId() returns empty when not found")
+    void testFindByAbbreviatedTaxInvoiceId_notFound() {
+        when(jpaRepository.findByAbbreviatedTaxInvoiceId("unknown")).thenReturn(Optional.empty());
+        assertThat(repository.findByAbbreviatedTaxInvoiceId("unknown")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("deleteById() delegates to JPA repository")
+    void testDeleteById() {
+        repository.deleteById(id);
+        verify(jpaRepository).deleteById(id);
+    }
+
+    @Test
+    @DisplayName("flush() delegates to JPA repository")
+    void testFlush() {
+        repository.flush();
+        verify(jpaRepository).flush();
+    }
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+```bash
+mvn test -Dtest="JpaAbbreviatedTaxInvoicePdfDocumentRepositoryImplTest" 2>&1 | tail -10
+```
+
+Expected: compilation error — entity and adapter classes don't exist yet.
+
+- [ ] **Step 3: Create `AbbreviatedTaxInvoicePdfDocumentEntity`**
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.persistence;
+
+import com.wpanther.abbreviatedtaxinvoice.pdf.domain.model.GenerationStatus;
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+
+import java.time.LocalDateTime;
+import java.util.UUID;
+
+@Entity
+@Table(name = "abbreviated_tax_invoice_pdf_documents", indexes = {
+    @Index(name = "idx_ati_pdf_ati_id", columnList = "abbreviated_tax_invoice_id"),
+    @Index(name = "idx_ati_pdf_ati_number", columnList = "abbreviated_tax_invoice_number"),
+    @Index(name = "idx_ati_pdf_status", columnList = "status")
+})
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class AbbreviatedTaxInvoicePdfDocumentEntity {
+
+    @Id
+    @Column(name = "id", nullable = false)
+    private UUID id;
+
+    @Column(name = "abbreviated_tax_invoice_id", nullable = false, length = 100)
+    private String abbreviatedTaxInvoiceId;
+
+    @Column(name = "abbreviated_tax_invoice_number", nullable = false, length = 50)
+    private String abbreviatedTaxInvoiceNumber;
+
+    @Column(name = "document_path", length = 500)
+    private String documentPath;
+
+    @Column(name = "document_url", length = 1000)
+    private String documentUrl;
+
+    @Column(name = "file_size")
+    private Long fileSize;
+
+    @Column(name = "mime_type", nullable = false, length = 100)
+    private String mimeType;
+
+    @Column(name = "xml_embedded", nullable = false)
+    private Boolean xmlEmbedded;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private GenerationStatus status;
+
+    @Column(name = "error_message", columnDefinition = "TEXT")
+    private String errorMessage;
+
+    @Column(name = "retry_count")
+    private Integer retryCount;
+
+    @CreationTimestamp
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
+    @Column(name = "completed_at")
+    private LocalDateTime completedAt;
+
+    @PrePersist
+    protected void onCreate() {
+        if (id == null)          id = UUID.randomUUID();
+        if (status == null)      status = GenerationStatus.PENDING;
+        if (mimeType == null)    mimeType = "application/pdf";
+        if (xmlEmbedded == null) xmlEmbedded = false;
+        if (retryCount == null)  retryCount = 0;
+    }
+}
+```
+
+- [ ] **Step 4: Create `JpaAbbreviatedTaxInvoicePdfDocumentRepository`**
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.persistence;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+
+@Repository
+public interface JpaAbbreviatedTaxInvoicePdfDocumentRepository
+        extends JpaRepository<AbbreviatedTaxInvoicePdfDocumentEntity, UUID> {
+
+    Optional<AbbreviatedTaxInvoicePdfDocumentEntity> findByAbbreviatedTaxInvoiceId(String abbreviatedTaxInvoiceId);
+
+    @Query("SELECT e.documentPath FROM AbbreviatedTaxInvoicePdfDocumentEntity e WHERE e.documentPath IS NOT NULL")
+    Set<String> findAllDocumentPaths();
+}
+```
+
+- [ ] **Step 5: Create `AbbreviatedTaxInvoicePdfDocumentRepositoryAdapter`**
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.persistence;
+
+import com.wpanther.abbreviatedtaxinvoice.pdf.domain.model.AbbreviatedTaxInvoicePdfDocument;
+import com.wpanther.abbreviatedtaxinvoice.pdf.domain.repository.AbbreviatedTaxInvoicePdfDocumentRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+import java.util.UUID;
+
+@Repository
+@RequiredArgsConstructor
+public class AbbreviatedTaxInvoicePdfDocumentRepositoryAdapter
+        implements AbbreviatedTaxInvoicePdfDocumentRepository {
+
+    private final JpaAbbreviatedTaxInvoicePdfDocumentRepository jpaRepository;
+
+    @Override
+    public AbbreviatedTaxInvoicePdfDocument save(AbbreviatedTaxInvoicePdfDocument document) {
+        return toDomain(jpaRepository.save(toEntity(document)));
+    }
+
+    @Override
+    public Optional<AbbreviatedTaxInvoicePdfDocument> findById(UUID id) {
+        return jpaRepository.findById(id).map(this::toDomain);
+    }
+
+    @Override
+    public Optional<AbbreviatedTaxInvoicePdfDocument> findByAbbreviatedTaxInvoiceId(String abbreviatedTaxInvoiceId) {
+        return jpaRepository.findByAbbreviatedTaxInvoiceId(abbreviatedTaxInvoiceId).map(this::toDomain);
+    }
+
+    @Override
+    public void deleteById(UUID id) {
+        jpaRepository.deleteById(id);
+    }
+
+    @Override
+    public void flush() {
+        jpaRepository.flush();
+    }
+
+    private AbbreviatedTaxInvoicePdfDocumentEntity toEntity(AbbreviatedTaxInvoicePdfDocument doc) {
+        return AbbreviatedTaxInvoicePdfDocumentEntity.builder()
+                .id(doc.getId())
+                .abbreviatedTaxInvoiceId(doc.getAbbreviatedTaxInvoiceId())
+                .abbreviatedTaxInvoiceNumber(doc.getAbbreviatedTaxInvoiceNumber())
+                .documentPath(doc.getDocumentPath())
+                .documentUrl(doc.getDocumentUrl())
+                .fileSize(doc.getFileSize())
+                .mimeType(doc.getMimeType())
+                .xmlEmbedded(doc.isXmlEmbedded())
+                .status(doc.getStatus())
+                .errorMessage(doc.getErrorMessage())
+                .retryCount(doc.getRetryCount())
+                .createdAt(doc.getCreatedAt())
+                .completedAt(doc.getCompletedAt())
+                .build();
+    }
+
+    private AbbreviatedTaxInvoicePdfDocument toDomain(AbbreviatedTaxInvoicePdfDocumentEntity e) {
+        return AbbreviatedTaxInvoicePdfDocument.builder()
+                .id(e.getId())
+                .abbreviatedTaxInvoiceId(e.getAbbreviatedTaxInvoiceId())
+                .abbreviatedTaxInvoiceNumber(e.getAbbreviatedTaxInvoiceNumber())
+                .documentPath(e.getDocumentPath())
+                .documentUrl(e.getDocumentUrl())
+                .fileSize(e.getFileSize() != null ? e.getFileSize() : 0L)
+                .mimeType(e.getMimeType())
+                .xmlEmbedded(e.getXmlEmbedded() != null && e.getXmlEmbedded())
+                .status(e.getStatus())
+                .errorMessage(e.getErrorMessage())
+                .retryCount(e.getRetryCount() != null ? e.getRetryCount() : 0)
+                .createdAt(e.getCreatedAt())
+                .completedAt(e.getCompletedAt())
+                .build();
+    }
+}
+```
+
+- [ ] **Step 6: Run the tests**
+
+```bash
+mvn test -Dtest="JpaAbbreviatedTaxInvoicePdfDocumentRepositoryImplTest" 2>&1 | tail -10
+```
+
+Expected: `BUILD SUCCESS`, 7 tests pass.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/
+git commit -m "feat: add persistence entity, JPA repository, and repository adapter"
+```
+
+---
+
+## Task 7: Infrastructure Persistence — Outbox + Flyway Migration
+
+**Files:**
+- Create: `src/main/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/adapter/out/persistence/outbox/OutboxEventEntity.java`
+- Create: `src/main/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/adapter/out/persistence/outbox/SpringDataOutboxRepository.java`
+- Create: `src/main/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/adapter/out/persistence/outbox/JpaOutboxEventRepository.java`
+- Create: `src/main/resources/db/migration/V1__create_abbreviated_tax_invoice_pdf_tables.sql`
+
+These classes are identical to the taxinvoice service (the outbox schema is shared). No unit tests required — they are covered by integration tests in `saga-integration-tests`.
+
+- [ ] **Step 1: Create `OutboxEventEntity`** (copy verbatim from taxinvoice, change only the package)
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.persistence.outbox;
+
+import com.wpanther.saga.domain.outbox.OutboxStatus;
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.time.Instant;
+import java.util.UUID;
+
+@Entity
+@Table(name = "outbox_events", indexes = {
+    @Index(name = "idx_outbox_status", columnList = "status"),
+    @Index(name = "idx_outbox_created", columnList = "created_at"),
+    @Index(name = "idx_outbox_aggregate", columnList = "aggregate_id, aggregate_type")
+})
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class OutboxEventEntity {
+
+    @Id
+    @Column(name = "id", nullable = false)
+    private UUID id;
+
+    @Column(name = "aggregate_type", nullable = false, length = 100)
+    private String aggregateType;
+
+    @Column(name = "aggregate_id", nullable = false, length = 100)
+    private String aggregateId;
+
+    @Column(name = "event_type", nullable = false, length = 100)
+    private String eventType;
+
+    @Column(name = "payload", nullable = false, columnDefinition = "TEXT")
+    private String payload;
+
+    @Column(name = "created_at", nullable = false)
+    private Instant createdAt;
+
+    @Column(name = "published_at")
+    private Instant publishedAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private OutboxStatus status;
+
+    @Column(name = "retry_count")
+    private Integer retryCount;
+
+    @Column(name = "error_message", length = 1000)
+    private String errorMessage;
+
+    @Column(name = "topic", length = 255)
+    private String topic;
+
+    @Column(name = "partition_key", length = 255)
+    private String partitionKey;
+
+    @Column(name = "headers", columnDefinition = "TEXT")
+    private String headers;
+
+    @PrePersist
+    protected void onCreate() {
+        if (id == null)         id = UUID.randomUUID();
+        if (status == null)     status = OutboxStatus.PENDING;
+        if (createdAt == null)  createdAt = Instant.now();
+        if (retryCount == null) retryCount = 0;
+    }
+
+    public static OutboxEventEntity fromDomain(com.wpanther.saga.domain.outbox.OutboxEvent event) {
+        return OutboxEventEntity.builder()
+                .id(event.getId())
+                .aggregateType(event.getAggregateType())
+                .aggregateId(event.getAggregateId())
+                .eventType(event.getEventType())
+                .payload(event.getPayload())
+                .createdAt(event.getCreatedAt())
+                .publishedAt(event.getPublishedAt())
+                .status(event.getStatus())
+                .retryCount(event.getRetryCount())
+                .errorMessage(event.getErrorMessage())
+                .topic(event.getTopic())
+                .partitionKey(event.getPartitionKey())
+                .headers(event.getHeaders())
+                .build();
+    }
+
+    public com.wpanther.saga.domain.outbox.OutboxEvent toDomain() {
+        return com.wpanther.saga.domain.outbox.OutboxEvent.builder()
+                .id(this.id)
+                .aggregateType(this.aggregateType)
+                .aggregateId(this.aggregateId)
+                .eventType(this.eventType)
+                .payload(this.payload)
+                .createdAt(this.createdAt)
+                .publishedAt(this.publishedAt)
+                .status(this.status)
+                .retryCount(this.retryCount)
+                .errorMessage(this.errorMessage)
+                .topic(this.topic)
+                .partitionKey(this.partitionKey)
+                .headers(this.headers)
+                .build();
+    }
+}
+```
+
+- [ ] **Step 2: Create `SpringDataOutboxRepository`**
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.persistence.outbox;
+
+import com.wpanther.saga.domain.outbox.OutboxStatus;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+
+@Repository
+public interface SpringDataOutboxRepository extends JpaRepository<OutboxEventEntity, UUID> {
+
+    List<OutboxEventEntity> findByStatusOrderByCreatedAtAsc(OutboxStatus status, Pageable pageable);
+
+    @Query("SELECT e FROM OutboxEventEntity e WHERE e.status = 'FAILED' ORDER BY e.createdAt ASC")
+    List<OutboxEventEntity> findFailedEventsOrderByCreatedAtAsc(Pageable pageable);
+
+    List<OutboxEventEntity> findByAggregateTypeAndAggregateIdOrderByCreatedAtAsc(
+            String aggregateType, String aggregateId);
+
+    @Modifying
+    @Query("DELETE FROM OutboxEventEntity e WHERE e.status = 'PUBLISHED' AND e.publishedAt < :before")
+    int deletePublishedBefore(@Param("before") Instant before);
+}
+```
+
+- [ ] **Step 3: Create `JpaOutboxEventRepository`**
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.persistence.outbox;
+
+import com.wpanther.saga.domain.outbox.OutboxEvent;
+import com.wpanther.saga.domain.outbox.OutboxEventRepository;
+import com.wpanther.saga.domain.outbox.OutboxStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Component;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+@Component
+public class JpaOutboxEventRepository implements OutboxEventRepository {
+
+    private static final Logger log = LoggerFactory.getLogger(JpaOutboxEventRepository.class);
+
+    private final SpringDataOutboxRepository springRepository;
+
+    public JpaOutboxEventRepository(SpringDataOutboxRepository springRepository) {
+        this.springRepository = springRepository;
+    }
+
+    @Override
+    public OutboxEvent save(OutboxEvent event) {
+        log.debug("Saving outbox event: {} for aggregate: {}/{}",
+                event.getId(), event.getAggregateType(), event.getAggregateId());
+        return springRepository.save(OutboxEventEntity.fromDomain(event)).toDomain();
+    }
+
+    @Override
+    public Optional<OutboxEvent> findById(UUID id) {
+        return springRepository.findById(id).map(OutboxEventEntity::toDomain);
+    }
+
+    @Override
+    public List<OutboxEvent> findPendingEvents(int limit) {
+        return springRepository.findByStatusOrderByCreatedAtAsc(OutboxStatus.PENDING, Pageable.ofSize(limit))
+                .stream().map(OutboxEventEntity::toDomain).toList();
+    }
+
+    @Override
+    public List<OutboxEvent> findFailedEvents(int limit) {
+        return springRepository.findFailedEventsOrderByCreatedAtAsc(Pageable.ofSize(limit))
+                .stream().map(OutboxEventEntity::toDomain).toList();
+    }
+
+    @Override
+    public int deletePublishedBefore(Instant before) {
+        int count = springRepository.deletePublishedBefore(before);
+        log.info("Deleted {} published outbox events before: {}", count, before);
+        return count;
+    }
+
+    @Override
+    public List<OutboxEvent> findByAggregate(String aggregateType, String aggregateId) {
+        return springRepository.findByAggregateTypeAndAggregateIdOrderByCreatedAtAsc(aggregateType, aggregateId)
+                .stream().map(OutboxEventEntity::toDomain).toList();
+    }
+}
+```
+
+- [ ] **Step 4: Create Flyway migration `V1__create_abbreviated_tax_invoice_pdf_tables.sql`**
+
+```sql
+-- abbreviated_tax_invoice_pdf_documents table
+CREATE TABLE abbreviated_tax_invoice_pdf_documents (
+    id UUID PRIMARY KEY,
+    abbreviated_tax_invoice_id VARCHAR(100) NOT NULL UNIQUE,
+    abbreviated_tax_invoice_number VARCHAR(50) NOT NULL,
+    document_path VARCHAR(500),
+    document_url VARCHAR(1000),
+    file_size BIGINT,
+    mime_type VARCHAR(100) NOT NULL DEFAULT 'application/pdf',
+    xml_embedded BOOLEAN NOT NULL DEFAULT false,
+    status VARCHAR(20) NOT NULL,
+    error_message TEXT,
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP
+);
+
+CREATE INDEX idx_ati_pdf_ati_id ON abbreviated_tax_invoice_pdf_documents(abbreviated_tax_invoice_id);
+CREATE INDEX idx_ati_pdf_ati_number ON abbreviated_tax_invoice_pdf_documents(abbreviated_tax_invoice_number);
+CREATE INDEX idx_ati_pdf_status ON abbreviated_tax_invoice_pdf_documents(status);
+
+-- outbox_events table
+CREATE TABLE outbox_events (
+    id UUID PRIMARY KEY,
+    aggregate_type VARCHAR(100) NOT NULL,
+    aggregate_id VARCHAR(100) NOT NULL,
+    event_type VARCHAR(100) NOT NULL,
+    payload TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    published_at TIMESTAMP WITH TIME ZONE,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    error_message VARCHAR(1000),
+    topic VARCHAR(255),
+    partition_key VARCHAR(255),
+    headers TEXT
+);
+
+CREATE INDEX idx_outbox_status ON outbox_events(status);
+CREATE INDEX idx_outbox_created ON outbox_events(created_at);
+CREATE INDEX idx_outbox_status_created ON outbox_events(status, created_at);
+CREATE INDEX idx_outbox_aggregate ON outbox_events(aggregate_id, aggregate_type);
+```
+
+- [ ] **Step 5: Verify compilation**
+
+```bash
+mvn compile -DskipTests 2>&1 | tail -5
+```
+
+Expected: `BUILD SUCCESS`.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/
+git commit -m "feat: add outbox persistence and Flyway migration"
+```
+
+---
+
 <!-- REMAINING TASKS: ask for more tasks in the next turn -->
