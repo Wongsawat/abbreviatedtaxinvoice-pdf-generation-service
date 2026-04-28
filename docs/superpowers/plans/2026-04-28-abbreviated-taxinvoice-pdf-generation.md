@@ -5648,4 +5648,1549 @@ git commit -m "feat: add REST client, application services (DocumentService + Sa
 
 ---
 
-<!-- REMAINING TASKS: ask for more tasks in the next turn -->
+---
+
+## Task 15: `application.yml` + `application-test.yml` + CamelRouteConfigTest + KafkaCommandMapperTest
+
+**Files:**
+- Create: `src/main/resources/application.yml`
+- Create: `src/test/resources/application-test.yml`
+- Test: `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/config/CamelRouteConfigTest.java`
+- Test: `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/adapter/in/kafka/KafkaCommandMapperTest.java`
+
+- [ ] **Step 1: Create `application.yml`**
+
+Create `src/main/resources/application.yml`:
+
+```yaml
+server:
+  port: 8096
+
+spring:
+  application:
+    name: abbreviatedtaxinvoice-pdf-generation-service
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:abbreviatedtaxinvoicepdf_db}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+# Apache Camel
+camel:
+  springboot:
+    name: abbreviatedtaxinvoice-pdf-generation-camel
+    main-run-controller: true
+  dataformat:
+    jackson:
+      auto-discover-object-mapper: true
+
+# Application-specific configuration
+app:
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
+    consumer:
+      command-group-id: ${KAFKA_COMMAND_GROUP_ID:abbreviated-tax-invoice-pdf-generation-command}
+      compensation-group-id: ${KAFKA_COMPENSATION_GROUP_ID:abbreviated-tax-invoice-pdf-generation-compensation}
+      break-on-first-error: ${KAFKA_BREAK_ON_FIRST_ERROR:true}
+      max-poll-records: ${KAFKA_MAX_POLL_RECORDS:100}
+      consumers-count: ${KAFKA_CONSUMERS_COUNT:3}
+    topics:
+      saga-command-abbreviated-tax-invoice-pdf: saga.command.abbreviated-tax-invoice-pdf
+      saga-compensation-abbreviated-tax-invoice-pdf: saga.compensation.abbreviated-tax-invoice-pdf
+      pdf-generated-abbreviated-tax-invoice: pdf.generated.abbreviated-tax-invoice
+      dlq: pdf.generation.abbreviated-tax-invoice.dlq
+  minio:
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    access-key: ${MINIO_ACCESS_KEY:minioadmin}
+    secret-key: ${MINIO_SECRET_KEY:minioadmin}
+    bucket-name: ${MINIO_BUCKET_NAME:abbreviatedtaxinvoices}
+    region: ${MINIO_REGION:us-east-1}
+    base-url: ${MINIO_BASE_URL:http://localhost:9000/abbreviatedtaxinvoices}
+    path-style-access: ${MINIO_PATH_STYLE_ACCESS:true}
+    cleanup:
+      enabled: ${MINIO_CLEANUP_ENABLED:false}
+      cron: ${MINIO_CLEANUP_CRON:0 0 2 * * ?}
+  pdf:
+    icc-profile-path: ${PDF_ICC_PROFILE_PATH:icc/sRGB.icc}
+    generation:
+      max-retries: ${PDF_GENERATION_MAX_RETRIES:3}
+      max-concurrent-renders: ${PDF_MAX_CONCURRENT_RENDERS:3}
+      max-pdf-size-bytes: ${PDF_MAX_SIZE_BYTES:52428800}
+  rest-client:
+    connect-timeout: ${REST_CLIENT_CONNECT_TIMEOUT:5000}
+    read-timeout: ${REST_CLIENT_READ_TIMEOUT:10000}
+    allowed-hosts: ${REST_CLIENT_ALLOWED_HOSTS:localhost}
+  fonts:
+    health-check:
+      enabled: ${FONT_HEALTH_CHECK_ENABLED:true}
+      fail-on-error: ${FONT_HEALTH_CHECK_FAIL_ON_ERROR:true}
+
+# Resilience4j Circuit Breaker
+resilience4j:
+  circuitbreaker:
+    instances:
+      minio:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        register-health-indicator: true
+      signedXmlFetch:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 60s
+        permitted-number-of-calls-in-half-open-state: 3
+        slow-call-rate-threshold: 50
+        slow-call-duration-threshold: 3s
+
+# Eureka client configuration
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    instance-id: ${spring.application.name}:${random.value}
+
+# Actuator endpoints
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,camelroutes
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
+
+# Logging
+logging:
+  level:
+    root: INFO
+    com.wpanther.abbreviatedtaxinvoice.pdf: INFO
+    org.apache.camel: INFO
+    org.apache.camel.component.kafka: DEBUG
+    org.apache.fop: INFO
+    org.apache.pdfbox: INFO
+```
+
+- [ ] **Step 2: Create `application-test.yml`**
+
+Create `src/test/resources/application-test.yml`:
+
+```yaml
+spring:
+  application:
+    name: abbreviatedtaxinvoice-pdf-generation-service-test
+
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+
+  flyway:
+    enabled: false
+
+# Apache Camel - disabled for unit tests
+camel:
+  springboot:
+    name: abbreviatedtaxinvoice-pdf-generation-camel-test
+    main-run-controller: false
+  dataformat:
+    jackson:
+      auto-discover-object-mapper: true
+
+# Application configuration for tests
+app:
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: abbreviatedtaxinvoice-pdf-generation-service-test
+    topics:
+      saga-command-abbreviated-tax-invoice-pdf: saga.command.abbreviated-tax-invoice-pdf
+      saga-compensation-abbreviated-tax-invoice-pdf: saga.compensation.abbreviated-tax-invoice-pdf
+      pdf-generated-abbreviated-tax-invoice: pdf.generated.abbreviated-tax-invoice
+      dlq: pdf.generation.abbreviated-tax-invoice.dlq
+  minio:
+    endpoint: http://localhost:9000
+    access-key: minioadmin
+    secret-key: minioadmin
+    bucket-name: abbreviatedtaxinvoices-test
+    region: us-east-1
+    base-url: http://localhost:9000/abbreviatedtaxinvoices-test
+    path-style-access: true
+
+# Disable Eureka for tests
+eureka:
+  client:
+    enabled: false
+
+logging:
+  level:
+    root: WARN
+    com.wpanther.abbreviatedtaxinvoice.pdf: DEBUG
+    org.apache.camel: WARN
+```
+
+- [ ] **Step 3: Write `CamelRouteConfigTest`**
+
+Create `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/config/CamelRouteConfigTest.java`:
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.config;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.wpanther.saga.domain.enums.SagaStep;
+import com.wpanther.abbreviatedtaxinvoice.pdf.application.service.SagaCommandHandler;
+import com.wpanther.abbreviatedtaxinvoice.pdf.application.usecase.CompensateAbbreviatedTaxInvoicePdfUseCase;
+import com.wpanther.abbreviatedtaxinvoice.pdf.application.usecase.ProcessAbbreviatedTaxInvoicePdfUseCase;
+import com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.in.kafka.KafkaAbbreviatedTaxInvoiceCompensateCommand;
+import com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.in.kafka.KafkaAbbreviatedTaxInvoiceProcessCommand;
+import com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.in.kafka.SagaRouteConfig;
+import com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.messaging.AbbreviatedTaxInvoicePdfGeneratedEvent;
+import com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.messaging.AbbreviatedTaxInvoicePdfReplyEvent;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+@ExtendWith(MockitoExtension.class)
+@DisplayName("CamelRouteConfig Unit Tests")
+class CamelRouteConfigTest {
+
+    @Mock
+    private ProcessAbbreviatedTaxInvoicePdfUseCase processUseCase;
+
+    @Mock
+    private CompensateAbbreviatedTaxInvoicePdfUseCase compensateUseCase;
+
+    @Mock
+    private SagaCommandHandler sagaCommandHandler;
+
+    private ObjectMapper objectMapper;
+    private SagaRouteConfig sagaRouteConfig;
+
+    @BeforeEach
+    void setUp() {
+        objectMapper = new ObjectMapper();
+        objectMapper.registerModule(new JavaTimeModule());
+        sagaRouteConfig = new SagaRouteConfig(processUseCase, compensateUseCase,
+                sagaCommandHandler, objectMapper);
+    }
+
+    @Test
+    @DisplayName("Should serialize and deserialize KafkaAbbreviatedTaxInvoiceProcessCommand")
+    void testProcessCommandSerialization() throws Exception {
+        KafkaAbbreviatedTaxInvoiceProcessCommand command = new KafkaAbbreviatedTaxInvoiceProcessCommand(
+                "saga-001", SagaStep.GENERATE_ABBREVIATED_TAX_INVOICE_PDF, "corr-456",
+                "doc-123", "ATINV-2024-001",
+                "http://minio/abbreviated-invoice-signed.xml"
+        );
+
+        String json = objectMapper.writeValueAsString(command);
+        KafkaAbbreviatedTaxInvoiceProcessCommand deserialized =
+                objectMapper.readValue(json, KafkaAbbreviatedTaxInvoiceProcessCommand.class);
+
+        assertThat(deserialized.getSagaId()).isEqualTo("saga-001");
+        assertThat(deserialized.getSagaStep()).isEqualTo(SagaStep.GENERATE_ABBREVIATED_TAX_INVOICE_PDF);
+        assertThat(deserialized.getCorrelationId()).isEqualTo("corr-456");
+        assertThat(deserialized.getDocumentId()).isEqualTo("doc-123");
+        assertThat(deserialized.getDocumentNumber()).isEqualTo("ATINV-2024-001");
+        assertThat(deserialized.getSignedXmlUrl()).isEqualTo("http://minio/abbreviated-invoice-signed.xml");
+        assertThat(deserialized.getEventId()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("Should serialize and deserialize KafkaAbbreviatedTaxInvoiceCompensateCommand")
+    void testCompensateCommandSerialization() throws Exception {
+        KafkaAbbreviatedTaxInvoiceCompensateCommand command =
+                new KafkaAbbreviatedTaxInvoiceCompensateCommand(
+                        "saga-001", SagaStep.GENERATE_ABBREVIATED_TAX_INVOICE_PDF,
+                        "corr-456", "doc-123");
+
+        String json = objectMapper.writeValueAsString(command);
+        KafkaAbbreviatedTaxInvoiceCompensateCommand deserialized =
+                objectMapper.readValue(json, KafkaAbbreviatedTaxInvoiceCompensateCommand.class);
+
+        assertThat(deserialized.getSagaId()).isEqualTo("saga-001");
+        assertThat(deserialized.getSagaStep()).isEqualTo(SagaStep.GENERATE_ABBREVIATED_TAX_INVOICE_PDF);
+        assertThat(deserialized.getCorrelationId()).isEqualTo("corr-456");
+        assertThat(deserialized.getDocumentId()).isEqualTo("doc-123");
+    }
+
+    @Test
+    @DisplayName("Should serialize AbbreviatedTaxInvoicePdfGeneratedEvent with correct eventType")
+    void testGeneratedEventSerialization() throws Exception {
+        AbbreviatedTaxInvoicePdfGeneratedEvent event = new AbbreviatedTaxInvoicePdfGeneratedEvent(
+                "saga-001", "doc-123", "ATINV-2024-001",
+                "http://example.com/doc.pdf", 12345L, true, "corr-456");
+
+        String json = objectMapper.writeValueAsString(event);
+
+        assertThat(json).contains("\"eventType\":\"pdf.generated.abbreviated-tax-invoice\"");
+        assertThat(json).contains("\"eventId\"");
+        assertThat(event.getEventId()).isNotNull();
+        assertThat(event.getOccurredAt()).isNotNull();
+        assertThat(event.getVersion()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("Should create AbbreviatedTaxInvoicePdfReplyEvent with correct statuses")
+    void testReplyEventCreation() throws Exception {
+        AbbreviatedTaxInvoicePdfReplyEvent successReply = AbbreviatedTaxInvoicePdfReplyEvent.success(
+                "saga-001", SagaStep.GENERATE_ABBREVIATED_TAX_INVOICE_PDF, "corr-456",
+                "http://localhost:9000/abbreviatedtaxinvoices/test.pdf", 12345L);
+        AbbreviatedTaxInvoicePdfReplyEvent failureReply = AbbreviatedTaxInvoicePdfReplyEvent.failure(
+                "saga-001", SagaStep.GENERATE_ABBREVIATED_TAX_INVOICE_PDF, "corr-456", "error msg");
+        AbbreviatedTaxInvoicePdfReplyEvent compensatedReply = AbbreviatedTaxInvoicePdfReplyEvent.compensated(
+                "saga-001", SagaStep.GENERATE_ABBREVIATED_TAX_INVOICE_PDF, "corr-456");
+
+        assertThat(successReply.isSuccess()).isTrue();
+        assertThat(successReply.getSagaId()).isEqualTo("saga-001");
+
+        assertThat(failureReply.isFailure()).isTrue();
+        assertThat(failureReply.getErrorMessage()).isEqualTo("error msg");
+
+        assertThat(compensatedReply.isCompensated()).isTrue();
+
+        String json = objectMapper.writeValueAsString(successReply);
+        assertThat(json).contains("\"sagaId\":\"saga-001\"");
+        assertThat(json).contains("\"status\":\"SUCCESS\"");
+    }
+
+    @Test
+    @DisplayName("Should deserialize KafkaAbbreviatedTaxInvoiceProcessCommand from JSON")
+    void testProcessCommandDeserialization() throws Exception {
+        String json = """
+            {
+                "eventId": "550e8400-e29b-41d4-a716-446655440000",
+                "occurredAt": "2024-01-15T10:30:00Z",
+                "eventType": "saga.command.abbreviated-tax-invoice-pdf",
+                "version": 1,
+                "sagaId": "saga-001",
+                "sagaStep": "generate-abbreviated-tax-invoice-pdf",
+                "correlationId": "corr-456",
+                "documentId": "doc-123",
+                "documentNumber": "ATINV-2024-001",
+                "signedXmlUrl": "http://minio/abbreviated-invoice-signed.xml"
+            }
+            """;
+
+        KafkaAbbreviatedTaxInvoiceProcessCommand cmd =
+                objectMapper.readValue(json, KafkaAbbreviatedTaxInvoiceProcessCommand.class);
+
+        assertThat(cmd.getEventId()).isEqualTo(UUID.fromString("550e8400-e29b-41d4-a716-446655440000"));
+        assertThat(cmd.getSagaId()).isEqualTo("saga-001");
+        assertThat(cmd.getSagaStep()).isEqualTo(SagaStep.GENERATE_ABBREVIATED_TAX_INVOICE_PDF);
+        assertThat(cmd.getCorrelationId()).isEqualTo("corr-456");
+        assertThat(cmd.getDocumentId()).isEqualTo("doc-123");
+        assertThat(cmd.getDocumentNumber()).isEqualTo("ATINV-2024-001");
+        assertThat(cmd.getSignedXmlUrl()).isEqualTo("http://minio/abbreviated-invoice-signed.xml");
+    }
+}
+```
+
+- [ ] **Step 4: Write `KafkaCommandMapperTest`**
+
+Create `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/adapter/in/kafka/KafkaCommandMapperTest.java`:
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.in.kafka;
+
+import com.wpanther.saga.domain.enums.SagaStep;
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.*;
+
+class KafkaCommandMapperTest {
+
+    private final KafkaCommandMapper mapper = new KafkaCommandMapper();
+
+    @Test
+    void toProcess_mapsAllFields() {
+        var src = new KafkaAbbreviatedTaxInvoiceProcessCommand(
+                null, null, null, 0,
+                "saga-1", SagaStep.GENERATE_ABBREVIATED_TAX_INVOICE_PDF, "corr-1",
+                "doc-1", "ATINV-001", "http://minio/xml");
+
+        var result = mapper.toProcess(src);
+
+        assertThat(result.getSagaId()).isEqualTo("saga-1");
+        assertThat(result.getCorrelationId()).isEqualTo("corr-1");
+        assertThat(result.getDocumentId()).isEqualTo("doc-1");
+        assertThat(result.getDocumentNumber()).isEqualTo("ATINV-001");
+        assertThat(result.getSignedXmlUrl()).isEqualTo("http://minio/xml");
+    }
+
+    @Test
+    void toCompensate_mapsAllFields() {
+        var src = new KafkaAbbreviatedTaxInvoiceCompensateCommand(
+                null, null, null, 0,
+                "saga-2", SagaStep.GENERATE_ABBREVIATED_TAX_INVOICE_PDF, "corr-2",
+                "doc-2");
+
+        var result = mapper.toCompensate(src);
+
+        assertThat(result.getSagaId()).isEqualTo("saga-2");
+        assertThat(result.getCorrelationId()).isEqualTo("corr-2");
+        assertThat(result.getDocumentId()).isEqualTo("doc-2");
+    }
+}
+```
+
+- [ ] **Step 5: Run tests**
+
+```bash
+cd /home/wpanther/projects/etax/invoice-microservices/services/abbreviatedtaxinvoice-pdf-generation-service
+mvn test -Dtest="CamelRouteConfigTest,KafkaCommandMapperTest" 2>&1 | tail -10
+```
+
+Expected: `BUILD SUCCESS`.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/
+git commit -m "feat: add application.yml, test config, Camel route serialization tests, command mapper tests"
+```
+
+---
+
+## Task 16: Remaining Domain + Persistence + Messaging Tests
+
+This task covers the test classes not yet written: domain model, exception, constants, repository adapter, event publisher, saga reply publisher, service impl, and Thai amount words converter.
+
+**Files:**
+- Test: `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/domain/model/AbbreviatedTaxInvoicePdfDocumentTest.java`
+- Test: `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/domain/exception/AbbreviatedTaxInvoicePdfGenerationExceptionTest.java`
+- Test: `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/domain/constants/PdfGenerationConstantsTest.java`
+- Test: `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/adapter/out/persistence/AbbreviatedTaxInvoicePdfDocumentRepositoryAdapterTest.java`
+- Test: `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/adapter/out/messaging/EventPublisherTest.java`
+- Test: `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/adapter/out/messaging/SagaReplyPublisherTest.java`
+- Test: `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/adapter/out/pdf/AbbreviatedTaxInvoicePdfGenerationServiceImplTest.java`
+- Test: `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/adapter/out/pdf/ThaiAmountWordsConverterTest.java`
+
+- [ ] **Step 1: Create `AbbreviatedTaxInvoicePdfDocumentTest`**
+
+Create `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/domain/model/AbbreviatedTaxInvoicePdfDocumentTest.java`:
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.domain.model;
+
+import com.wpanther.abbreviatedtaxinvoice.pdf.domain.exception.AbbreviatedTaxInvoicePdfGenerationException;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.*;
+
+@DisplayName("AbbreviatedTaxInvoicePdfDocument Aggregate Tests")
+class AbbreviatedTaxInvoicePdfDocumentTest {
+
+    private AbbreviatedTaxInvoicePdfDocument pendingDocument() {
+        return AbbreviatedTaxInvoicePdfDocument.builder()
+                .abbreviatedTaxInvoiceId("atax-inv-001")
+                .abbreviatedTaxInvoiceNumber("ATINV-2024-001")
+                .build();
+    }
+
+    @Test
+    @DisplayName("Should create document in PENDING status with defaults")
+    void testCreate_Defaults() {
+        AbbreviatedTaxInvoicePdfDocument doc = pendingDocument();
+
+        assertThat(doc.getId()).isNotNull();
+        assertThat(doc.getStatus()).isEqualTo(GenerationStatus.PENDING);
+        assertThat(doc.getMimeType()).isEqualTo("application/pdf");
+        assertThat(doc.getRetryCount()).isZero();
+        assertThat(doc.isXmlEmbedded()).isFalse();
+        assertThat(doc.getCreatedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("Should reject blank abbreviatedTaxInvoiceId")
+    void testCreate_BlankId() {
+        assertThatThrownBy(() ->
+                AbbreviatedTaxInvoicePdfDocument.builder()
+                        .abbreviatedTaxInvoiceId("   ")
+                        .abbreviatedTaxInvoiceNumber("ATINV-001")
+                        .build()
+        ).isInstanceOf(AbbreviatedTaxInvoicePdfGenerationException.class)
+         .hasMessageContaining("Abbreviated Tax Invoice ID cannot be blank");
+    }
+
+    @Test
+    @DisplayName("Should reject null abbreviatedTaxInvoiceNumber")
+    void testCreate_NullNumber() {
+        assertThatThrownBy(() ->
+                AbbreviatedTaxInvoicePdfDocument.builder()
+                        .abbreviatedTaxInvoiceId("atax-inv-001")
+                        .abbreviatedTaxInvoiceNumber(null)
+                        .build()
+        ).isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    @DisplayName("PENDING → startGeneration() → GENERATING")
+    void testStartGeneration() {
+        AbbreviatedTaxInvoicePdfDocument doc = pendingDocument();
+        doc.startGeneration();
+        assertThat(doc.getStatus()).isEqualTo(GenerationStatus.GENERATING);
+    }
+
+    @Test
+    @DisplayName("GENERATING → markCompleted() → COMPLETED")
+    void testMarkCompleted() {
+        AbbreviatedTaxInvoicePdfDocument doc = pendingDocument();
+        doc.startGeneration();
+        doc.markCompleted("2024/01/15/test.pdf", "http://minio/test.pdf", 12345L);
+
+        assertThat(doc.getStatus()).isEqualTo(GenerationStatus.COMPLETED);
+        assertThat(doc.getDocumentPath()).isEqualTo("2024/01/15/test.pdf");
+        assertThat(doc.getDocumentUrl()).isEqualTo("http://minio/test.pdf");
+        assertThat(doc.getFileSize()).isEqualTo(12345L);
+        assertThat(doc.getCompletedAt()).isNotNull();
+        assertThat(doc.isCompleted()).isTrue();
+        assertThat(doc.isSuccessful()).isTrue();
+    }
+
+    @Test
+    @DisplayName("Any state → markFailed() → FAILED")
+    void testMarkFailed_FromPending() {
+        AbbreviatedTaxInvoicePdfDocument doc = pendingDocument();
+        doc.markFailed("Something went wrong");
+
+        assertThat(doc.getStatus()).isEqualTo(GenerationStatus.FAILED);
+        assertThat(doc.getErrorMessage()).isEqualTo("Something went wrong");
+        assertThat(doc.isFailed()).isTrue();
+        assertThat(doc.isCompleted()).isFalse();
+        assertThat(doc.getCompletedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("PENDING → markXmlEmbedded() sets flag")
+    void testMarkXmlEmbedded() {
+        AbbreviatedTaxInvoicePdfDocument doc = pendingDocument();
+        assertThat(doc.isXmlEmbedded()).isFalse();
+        doc.markXmlEmbedded();
+        assertThat(doc.isXmlEmbedded()).isTrue();
+    }
+
+    @Test
+    @DisplayName("startGeneration() from GENERATING throws")
+    void testStartGeneration_AlreadyGenerating() {
+        AbbreviatedTaxInvoicePdfDocument doc = pendingDocument();
+        doc.startGeneration();
+
+        assertThatThrownBy(doc::startGeneration)
+                .isInstanceOf(AbbreviatedTaxInvoicePdfGenerationException.class)
+                .hasMessageContaining("PENDING");
+    }
+
+    @Test
+    @DisplayName("markCompleted() from PENDING throws")
+    void testMarkCompleted_FromPending() {
+        AbbreviatedTaxInvoicePdfDocument doc = pendingDocument();
+
+        assertThatThrownBy(() -> doc.markCompleted("path", "url", 100L))
+                .isInstanceOf(AbbreviatedTaxInvoicePdfGenerationException.class)
+                .hasMessageContaining("GENERATING");
+    }
+
+    @Test
+    @DisplayName("markCompleted() with zero fileSize throws")
+    void testMarkCompleted_ZeroFileSize() {
+        AbbreviatedTaxInvoicePdfDocument doc = pendingDocument();
+        doc.startGeneration();
+
+        assertThatThrownBy(() -> doc.markCompleted("path", "url", 0L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("File size must be positive");
+    }
+
+    @Test
+    @DisplayName("markCompleted() with null documentPath throws NPE")
+    void testMarkCompleted_NullPath() {
+        AbbreviatedTaxInvoicePdfDocument doc = pendingDocument();
+        doc.startGeneration();
+
+        assertThatThrownBy(() -> doc.markCompleted(null, "url", 100L))
+                .isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    @DisplayName("incrementRetryCount() increases count by one")
+    void testIncrementRetryCount() {
+        AbbreviatedTaxInvoicePdfDocument doc = pendingDocument();
+        assertThat(doc.getRetryCount()).isZero();
+        doc.incrementRetryCount();
+        assertThat(doc.getRetryCount()).isOne();
+        doc.incrementRetryCount();
+        assertThat(doc.getRetryCount()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("incrementRetryCountTo() advances count to target")
+    void testIncrementRetryCountTo_AdvancesToTarget() {
+        AbbreviatedTaxInvoicePdfDocument doc = pendingDocument();
+        doc.incrementRetryCountTo(2);
+        assertThat(doc.getRetryCount()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("incrementRetryCountTo() is a no-op when count already at target")
+    void testIncrementRetryCountTo_NoOpWhenAlreadyAtTarget() {
+        AbbreviatedTaxInvoicePdfDocument doc = AbbreviatedTaxInvoicePdfDocument.builder()
+                .abbreviatedTaxInvoiceId("atax-inv-001")
+                .abbreviatedTaxInvoiceNumber("ATINV-001")
+                .retryCount(2)
+                .build();
+        doc.incrementRetryCountTo(1);
+        assertThat(doc.getRetryCount()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("isMaxRetriesExceeded() returns true when retryCount >= maxRetries")
+    void testIsMaxRetriesExceeded_AtLimit() {
+        AbbreviatedTaxInvoicePdfDocument doc = AbbreviatedTaxInvoicePdfDocument.builder()
+                .abbreviatedTaxInvoiceId("atax-inv-001")
+                .abbreviatedTaxInvoiceNumber("ATINV-001")
+                .retryCount(3)
+                .build();
+        assertThat(doc.isMaxRetriesExceeded(3)).isTrue();
+    }
+
+    @Test
+    @DisplayName("isMaxRetriesExceeded() returns false when retryCount < maxRetries")
+    void testIsMaxRetriesExceeded_BelowLimit() {
+        AbbreviatedTaxInvoicePdfDocument doc = AbbreviatedTaxInvoicePdfDocument.builder()
+                .abbreviatedTaxInvoiceId("atax-inv-001")
+                .abbreviatedTaxInvoiceNumber("ATINV-001")
+                .retryCount(2)
+                .build();
+        assertThat(doc.isMaxRetriesExceeded(3)).isFalse();
+    }
+}
+```
+
+- [ ] **Step 2: Create `AbbreviatedTaxInvoicePdfGenerationExceptionTest`**
+
+Create `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/domain/exception/AbbreviatedTaxInvoicePdfGenerationExceptionTest.java`:
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.domain.exception;
+
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.*;
+
+class AbbreviatedTaxInvoicePdfGenerationExceptionTest {
+
+    @Test
+    void constructor_withMessage_storesMessage() {
+        var ex = new AbbreviatedTaxInvoicePdfGenerationException("test error");
+        assertThat(ex.getMessage()).isEqualTo("test error");
+    }
+
+    @Test
+    void constructor_withMessageAndCause_storesBoth() {
+        var cause = new RuntimeException("root");
+        var ex = new AbbreviatedTaxInvoicePdfGenerationException("wrapped", cause);
+        assertThat(ex.getMessage()).isEqualTo("wrapped");
+        assertThat(ex.getCause()).isSameAs(cause);
+    }
+
+    @Test
+    void isRuntimeException() {
+        assertThat(new AbbreviatedTaxInvoicePdfGenerationException("x"))
+                .isInstanceOf(RuntimeException.class);
+    }
+}
+```
+
+- [ ] **Step 3: Create `PdfGenerationConstantsTest`**
+
+Create `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/domain/constants/PdfGenerationConstantsTest.java`:
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.domain.constants;
+
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+@DisplayName("PdfGenerationConstants Unit Tests")
+class PdfGenerationConstantsTest {
+
+    @Test
+    @DisplayName("DEFAULT_MAX_RETRIES should be 3")
+    void testDefaultMaxRetries() {
+        assertThat(PdfGenerationConstants.DEFAULT_MAX_RETRIES).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("PDF_MIME_TYPE should be 'application/pdf'")
+    void testPdfMimeType() {
+        assertThat(PdfGenerationConstants.PDF_MIME_TYPE).isEqualTo("application/pdf");
+    }
+
+    @Test
+    @DisplayName("Constructor should be private - utility class pattern")
+    void testConstructorIsPrivate() throws Exception {
+        var constructor = PdfGenerationConstants.class.getDeclaredConstructor();
+        assertThat(java.lang.reflect.Modifier.isPrivate(constructor.getModifiers())).isTrue();
+    }
+}
+```
+
+- [ ] **Step 4: Create `AbbreviatedTaxInvoicePdfDocumentRepositoryAdapterTest`**
+
+Create `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/adapter/out/persistence/AbbreviatedTaxInvoicePdfDocumentRepositoryAdapterTest.java`:
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.persistence;
+
+import com.wpanther.abbreviatedtaxinvoice.pdf.domain.model.AbbreviatedTaxInvoicePdfDocument;
+import com.wpanther.abbreviatedtaxinvoice.pdf.domain.model.GenerationStatus;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.time.LocalDateTime;
+import java.util.Optional;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
+@ExtendWith(MockitoExtension.class)
+@DisplayName("AbbreviatedTaxInvoicePdfDocumentRepositoryAdapter Unit Tests")
+class AbbreviatedTaxInvoicePdfDocumentRepositoryAdapterTest {
+
+    @Mock
+    private JpaAbbreviatedTaxInvoicePdfDocumentRepository jpaRepository;
+
+    private AbbreviatedTaxInvoicePdfDocumentRepositoryAdapter repository;
+
+    private UUID id;
+    private AbbreviatedTaxInvoicePdfDocument domain;
+
+    @BeforeEach
+    void setUp() {
+        repository = new AbbreviatedTaxInvoicePdfDocumentRepositoryAdapter(jpaRepository);
+        id = UUID.randomUUID();
+        LocalDateTime now = LocalDateTime.now();
+
+        domain = AbbreviatedTaxInvoicePdfDocument.builder()
+                .id(id)
+                .abbreviatedTaxInvoiceId("atax-inv-123")
+                .abbreviatedTaxInvoiceNumber("ATINV-2024-001")
+                .documentPath("2024/01/15/abbreviated-tax-invoice-ATINV-2024-001-abc.pdf")
+                .documentUrl("http://localhost:9000/abbreviatedtaxinvoices/2024/01/15/abbreviated-tax-invoice-ATINV-2024-001-abc.pdf")
+                .fileSize(12345L)
+                .mimeType("application/pdf")
+                .xmlEmbedded(true)
+                .status(GenerationStatus.COMPLETED)
+                .retryCount(1)
+                .createdAt(now)
+                .completedAt(now)
+                .build();
+    }
+
+    @Test
+    @DisplayName("save() maps domain to entity and back")
+    void testSave_roundTrip() {
+        AbbreviatedTaxInvoicePdfDocumentEntity entity = AbbreviatedTaxInvoicePdfDocumentEntity.builder()
+                .id(id)
+                .abbreviatedTaxInvoiceId("atax-inv-123")
+                .abbreviatedTaxInvoiceNumber("ATINV-2024-001")
+                .documentPath("2024/01/15/abbreviated-tax-invoice-ATINV-2024-001-abc.pdf")
+                .documentUrl("http://localhost:9000/abbreviatedtaxinvoices/2024/01/15/abbreviated-tax-invoice-ATINV-2024-001-abc.pdf")
+                .fileSize(12345L)
+                .mimeType("application/pdf")
+                .xmlEmbedded(true)
+                .status(GenerationStatus.COMPLETED)
+                .errorMessage(null)
+                .retryCount(1)
+                .createdAt(LocalDateTime.now())
+                .completedAt(LocalDateTime.now())
+                .build();
+        when(jpaRepository.save(any())).thenReturn(entity);
+
+        AbbreviatedTaxInvoicePdfDocument result = repository.save(domain);
+
+        verify(jpaRepository).save(any(AbbreviatedTaxInvoicePdfDocumentEntity.class));
+        assertThat(result.getAbbreviatedTaxInvoiceId()).isEqualTo("atax-inv-123");
+        assertThat(result.getAbbreviatedTaxInvoiceNumber()).isEqualTo("ATINV-2024-001");
+        assertThat(result.getFileSize()).isEqualTo(12345L);
+        assertThat(result.isXmlEmbedded()).isTrue();
+        assertThat(result.getStatus()).isEqualTo(GenerationStatus.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("findById() returns mapped domain when found")
+    void testFindById_found() {
+        AbbreviatedTaxInvoicePdfDocumentEntity entity = AbbreviatedTaxInvoicePdfDocumentEntity.builder()
+                .id(id)
+                .abbreviatedTaxInvoiceId("atax-inv-123")
+                .abbreviatedTaxInvoiceNumber("ATINV-2024-001")
+                .status(GenerationStatus.COMPLETED)
+                .fileSize(12345L)
+                .xmlEmbedded(true)
+                .retryCount(0)
+                .mimeType("application/pdf")
+                .build();
+        when(jpaRepository.findById(id)).thenReturn(Optional.of(entity));
+
+        Optional<AbbreviatedTaxInvoicePdfDocument> result = repository.findById(id);
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getAbbreviatedTaxInvoiceId()).isEqualTo("atax-inv-123");
+    }
+
+    @Test
+    @DisplayName("findById() returns empty when not found")
+    void testFindById_notFound() {
+        when(jpaRepository.findById(id)).thenReturn(Optional.empty());
+        Optional<AbbreviatedTaxInvoicePdfDocument> result = repository.findById(id);
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("findByAbbreviatedTaxInvoiceId() returns mapped domain when found")
+    void testFindByAbbreviatedTaxInvoiceId_found() {
+        AbbreviatedTaxInvoicePdfDocumentEntity entity = AbbreviatedTaxInvoicePdfDocumentEntity.builder()
+                .id(id)
+                .abbreviatedTaxInvoiceId("atax-inv-123")
+                .abbreviatedTaxInvoiceNumber("ATINV-2024-001")
+                .status(GenerationStatus.COMPLETED)
+                .fileSize(12345L)
+                .xmlEmbedded(true)
+                .retryCount(0)
+                .mimeType("application/pdf")
+                .build();
+        when(jpaRepository.findByAbbreviatedTaxInvoiceId("atax-inv-123"))
+                .thenReturn(Optional.of(entity));
+
+        Optional<AbbreviatedTaxInvoicePdfDocument> result =
+                repository.findByAbbreviatedTaxInvoiceId("atax-inv-123");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getAbbreviatedTaxInvoiceId()).isEqualTo("atax-inv-123");
+    }
+
+    @Test
+    @DisplayName("findByAbbreviatedTaxInvoiceId() returns empty when not found")
+    void testFindByAbbreviatedTaxInvoiceId_notFound() {
+        when(jpaRepository.findByAbbreviatedTaxInvoiceId("unknown"))
+                .thenReturn(Optional.empty());
+
+        Optional<AbbreviatedTaxInvoicePdfDocument> result =
+                repository.findByAbbreviatedTaxInvoiceId("unknown");
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("deleteById() delegates to JPA repository")
+    void testDeleteById() {
+        repository.deleteById(id);
+        verify(jpaRepository).deleteById(id);
+    }
+
+    @Test
+    @DisplayName("flush() delegates to JPA repository")
+    void testFlush() {
+        repository.flush();
+        verify(jpaRepository).flush();
+    }
+}
+```
+
+- [ ] **Step 5: Create `EventPublisherTest`**
+
+Create `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/adapter/out/messaging/EventPublisherTest.java`:
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.messaging;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.wpanther.saga.infrastructure.outbox.OutboxService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+
+@ExtendWith(MockitoExtension.class)
+@DisplayName("EventPublisher Unit Tests")
+class EventPublisherTest {
+
+    @Mock
+    private OutboxService outboxService;
+
+    private ObjectMapper objectMapper;
+    private EventPublisher eventPublisher;
+
+    @BeforeEach
+    void setUp() {
+        objectMapper = new ObjectMapper();
+        objectMapper.registerModule(new JavaTimeModule());
+        eventPublisher = new EventPublisher(outboxService, objectMapper);
+    }
+
+    @Test
+    @DisplayName("publishPdfGenerated() calls OutboxService with correct parameters")
+    void testPublishPdfGenerated() {
+        AbbreviatedTaxInvoicePdfGeneratedEvent event = new AbbreviatedTaxInvoicePdfGeneratedEvent(
+                "saga-001", "doc-123", "ATINV-2024-001",
+                "http://localhost:9000/abbreviatedtaxinvoices/test.pdf", 12345L, true, "corr-456");
+
+        eventPublisher.publishPdfGenerated(event);
+
+        verify(outboxService).saveWithRouting(
+                eq(event),
+                eq("AbbreviatedTaxInvoicePdfDocument"),
+                eq("doc-123"),
+                eq("pdf.generated.abbreviated-tax-invoice"),
+                eq("doc-123"),
+                anyString());
+    }
+
+    @Test
+    @DisplayName("publishPdfGenerated() includes documentType header")
+    void testPublishPdfGenerated_Headers() {
+        AbbreviatedTaxInvoicePdfGeneratedEvent event = new AbbreviatedTaxInvoicePdfGeneratedEvent(
+                "saga-001", "doc-123", "ATINV-001",
+                "http://localhost:9000/abbreviatedtaxinvoices/test.pdf", 12345L, true, "corr-456");
+
+        eventPublisher.publishPdfGenerated(event);
+
+        ArgumentCaptor<String> headersCaptor = ArgumentCaptor.forClass(String.class);
+        verify(outboxService).saveWithRouting(
+                any(), anyString(), anyString(), anyString(), anyString(),
+                headersCaptor.capture());
+
+        String headersJson = headersCaptor.getValue();
+        assertThat(headersJson).contains("\"documentType\":\"ABBREVIATED_TAX_INVOICE\"");
+        assertThat(headersJson).contains("\"correlationId\":\"corr-456\"");
+    }
+
+    @Test
+    @DisplayName("Generated event stores sagaId and correlationId independently")
+    void testSagaIdAndCorrelationIdStoredIndependently() throws Exception {
+        AbbreviatedTaxInvoicePdfGeneratedEvent event = new AbbreviatedTaxInvoicePdfGeneratedEvent(
+                "saga-001", "doc-123", "ATINV-2024-001",
+                "http://localhost:9000/abbreviatedtaxinvoices/test.pdf", 12345L, true, "corr-456");
+
+        assertThat(event.getSagaId()).isEqualTo("saga-001");
+        assertThat(event.getCorrelationId()).isEqualTo("corr-456");
+
+        String json = objectMapper.writeValueAsString(event);
+        AbbreviatedTaxInvoicePdfGeneratedEvent deserialized =
+                objectMapper.readValue(json, AbbreviatedTaxInvoicePdfGeneratedEvent.class);
+        assertThat(deserialized.getSagaId()).isEqualTo("saga-001");
+        assertThat(deserialized.getCorrelationId()).isEqualTo("corr-456");
+    }
+}
+```
+
+- [ ] **Step 6: Create `SagaReplyPublisherTest`**
+
+Create `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/adapter/out/messaging/SagaReplyPublisherTest.java`:
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.messaging;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.wpanther.saga.domain.enums.SagaStep;
+import com.wpanther.saga.infrastructure.outbox.OutboxService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+
+@ExtendWith(MockitoExtension.class)
+@DisplayName("SagaReplyPublisher Unit Tests")
+class SagaReplyPublisherTest {
+
+    @Mock
+    private OutboxService outboxService;
+
+    private ObjectMapper objectMapper;
+    private SagaReplyPublisher sagaReplyPublisher;
+
+    @BeforeEach
+    void setUp() {
+        objectMapper = new ObjectMapper();
+        objectMapper.registerModule(new JavaTimeModule());
+        sagaReplyPublisher = new SagaReplyPublisher(outboxService, objectMapper);
+    }
+
+    @Test
+    @DisplayName("publishSuccess() calls OutboxService with SUCCESS reply")
+    void testPublishSuccess() {
+        sagaReplyPublisher.publishSuccess(
+                "saga-123", SagaStep.GENERATE_ABBREVIATED_TAX_INVOICE_PDF,
+                "corr-456", "http://localhost:9000/abbreviatedtaxinvoices/test.pdf", 12345L);
+
+        verify(outboxService).saveWithRouting(
+                any(AbbreviatedTaxInvoicePdfReplyEvent.class),
+                eq("AbbreviatedTaxInvoicePdfDocument"),
+                eq("saga-123"),
+                eq("saga.reply.abbreviated-tax-invoice-pdf"),
+                eq("saga-123"),
+                anyString());
+    }
+
+    @Test
+    @DisplayName("publishSuccess() includes pdfUrl and pdfSize in reply")
+    void testPublishSuccess_ReplyPayload() {
+        sagaReplyPublisher.publishSuccess(
+                "saga-1", SagaStep.GENERATE_ABBREVIATED_TAX_INVOICE_PDF,
+                "corr-1", "http://localhost:9000/abbreviatedtaxinvoices/test.pdf", 12345L);
+
+        ArgumentCaptor<AbbreviatedTaxInvoicePdfReplyEvent> replyCaptor =
+                ArgumentCaptor.forClass(AbbreviatedTaxInvoicePdfReplyEvent.class);
+        verify(outboxService).saveWithRouting(
+                replyCaptor.capture(), anyString(), anyString(), anyString(), anyString(), anyString());
+
+        AbbreviatedTaxInvoicePdfReplyEvent reply = replyCaptor.getValue();
+        assertThat(reply.isSuccess()).isTrue();
+        assertThat(reply.getPdfUrl()).isEqualTo("http://localhost:9000/abbreviatedtaxinvoices/test.pdf");
+        assertThat(reply.getPdfSize()).isEqualTo(12345L);
+    }
+
+    @Test
+    @DisplayName("publishFailure() calls OutboxService with FAILURE reply")
+    void testPublishFailure() {
+        sagaReplyPublisher.publishFailure(
+                "saga-123", SagaStep.GENERATE_ABBREVIATED_TAX_INVOICE_PDF,
+                "corr-456", "PDF generation failed");
+
+        ArgumentCaptor<AbbreviatedTaxInvoicePdfReplyEvent> replyCaptor =
+                ArgumentCaptor.forClass(AbbreviatedTaxInvoicePdfReplyEvent.class);
+        verify(outboxService).saveWithRouting(
+                replyCaptor.capture(), anyString(), anyString(), anyString(), anyString(), anyString());
+
+        AbbreviatedTaxInvoicePdfReplyEvent reply = replyCaptor.getValue();
+        assertThat(reply.isFailure()).isTrue();
+        assertThat(reply.getErrorMessage()).isEqualTo("PDF generation failed");
+    }
+
+    @Test
+    @DisplayName("publishCompensated() calls OutboxService with COMPENSATED reply")
+    void testPublishCompensated() {
+        sagaReplyPublisher.publishCompensated(
+                "saga-123", SagaStep.GENERATE_ABBREVIATED_TAX_INVOICE_PDF, "corr-456");
+
+        ArgumentCaptor<AbbreviatedTaxInvoicePdfReplyEvent> replyCaptor =
+                ArgumentCaptor.forClass(AbbreviatedTaxInvoicePdfReplyEvent.class);
+        verify(outboxService).saveWithRouting(
+                replyCaptor.capture(), anyString(), anyString(), anyString(), anyString(), anyString());
+
+        assertThat(replyCaptor.getValue().isCompensated()).isTrue();
+    }
+}
+```
+
+- [ ] **Step 7: Create `AbbreviatedTaxInvoicePdfGenerationServiceImplTest`**
+
+Create `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/adapter/out/pdf/AbbreviatedTaxInvoicePdfGenerationServiceImplTest.java`:
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.pdf;
+
+import com.wpanther.abbreviatedtaxinvoice.pdf.domain.service.AbbreviatedTaxInvoicePdfGenerationService.AbbreviatedTaxInvoicePdfGenerationException;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+@ExtendWith(MockitoExtension.class)
+@DisplayName("AbbreviatedTaxInvoicePdfGenerationServiceImpl Unit Tests")
+class AbbreviatedTaxInvoicePdfGenerationServiceImplTest {
+
+    @Mock
+    private FopAbbreviatedTaxInvoicePdfGenerator fopPdfGenerator;
+
+    @Mock
+    private PdfA3Converter pdfA3Converter;
+
+    private AbbreviatedTaxInvoicePdfGenerationServiceImpl service;
+
+    @BeforeEach
+    void setUp() throws Exception {
+        service = new AbbreviatedTaxInvoicePdfGenerationServiceImpl(fopPdfGenerator, pdfA3Converter);
+    }
+
+    @Test
+    @DisplayName("generatePdf() with null signedXml throws")
+    void testGeneratePdf_nullSignedXml() {
+        assertThatThrownBy(() -> service.generatePdf("ATINV-001", null))
+                .isInstanceOf(AbbreviatedTaxInvoicePdfGenerationException.class)
+                .hasMessageContaining("signedXml is null or blank");
+    }
+
+    @Test
+    @DisplayName("generatePdf() with blank signedXml throws")
+    void testGeneratePdf_blankSignedXml() {
+        assertThatThrownBy(() -> service.generatePdf("ATINV-001", "   "))
+                .isInstanceOf(AbbreviatedTaxInvoicePdfGenerationException.class)
+                .hasMessageContaining("signedXml is null or blank");
+    }
+
+    @Test
+    @DisplayName("generatePdf() with missing GrandTotalAmount throws")
+    void testGeneratePdf_missingGrandTotal() throws Exception {
+        String xml = "<?xml version=\"1.0\"?>" +
+                "<rsm:AbbreviatedTaxInvoice_CrossIndustryInvoice " +
+                "xmlns:rsm=\"urn:etda:uncefact:data:standard:AbbreviatedTaxInvoice_CrossIndustryInvoice:2\" " +
+                "xmlns:ram=\"urn:etda:uncefact:data:standard:AbbreviatedTaxInvoice_ReusableAggregateBusinessInformationEntity:2\">" +
+                "</rsm:AbbreviatedTaxInvoice_CrossIndustryInvoice>";
+
+        assertThatThrownBy(() -> service.generatePdf("ATINV-001", xml))
+                .isInstanceOf(AbbreviatedTaxInvoicePdfGenerationException.class)
+                .hasMessageContaining("GrandTotalAmount not found");
+    }
+
+    @Test
+    @DisplayName("generatePdf() with FOP failure wraps in domain exception")
+    void testGeneratePdf_fopFailure() throws Exception {
+        when(fopPdfGenerator.generatePdf(anyString(), anyMap()))
+                .thenThrow(new FopAbbreviatedTaxInvoicePdfGenerator.PdfGenerationException("FOP error"));
+
+        String xml = "<?xml version=\"1.0\"?>" +
+                "<rsm:AbbreviatedTaxInvoice_CrossIndustryInvoice " +
+                "xmlns:rsm=\"urn:etda:uncefact:data:standard:AbbreviatedTaxInvoice_CrossIndustryInvoice:2\" " +
+                "xmlns:ram=\"urn:etda:uncefact:data:standard:AbbreviatedTaxInvoice_ReusableAggregateBusinessInformationEntity:2\">" +
+                "<rsm:SupplyChainTradeTransaction>" +
+                "<ram:ApplicableHeaderTradeSettlement>" +
+                "<ram:SpecifiedTradeSettlementHeaderMonetarySummation>" +
+                "<ram:GrandTotalAmount>1000</ram:GrandTotalAmount>" +
+                "</ram:SpecifiedTradeSettlementHeaderMonetarySummation>" +
+                "</ram:ApplicableHeaderTradeSettlement>" +
+                "</rsm:SupplyChainTradeTransaction>" +
+                "</rsm:AbbreviatedTaxInvoice_CrossIndustryInvoice>";
+
+        assertThatThrownBy(() -> service.generatePdf("ATINV-001", xml))
+                .isInstanceOf(AbbreviatedTaxInvoicePdfGenerationException.class)
+                .hasMessageContaining("PDF generation failed");
+    }
+}
+```
+
+- [ ] **Step 8: Create `ThaiAmountWordsConverterTest`**
+
+Create `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/infrastructure/adapter/out/pdf/ThaiAmountWordsConverterTest.java`:
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.pdf;
+
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import java.math.BigDecimal;
+
+import static org.assertj.core.api.Assertions.*;
+
+@DisplayName("ThaiAmountWordsConverter Unit Tests")
+class ThaiAmountWordsConverterTest {
+
+    @Test
+    @DisplayName("Zero baht")
+    void testZero() {
+        assertThat(ThaiAmountWordsConverter.toWords(BigDecimal.ZERO))
+                .isEqualTo("ศูนย์บาทถ้วน");
+    }
+
+    @Test
+    @DisplayName("Integer amount with no satang")
+    void testIntegerBaht() {
+        assertThat(ThaiAmountWordsConverter.toWords(new BigDecimal("1000")))
+                .contains("บาทถ้วน");
+    }
+
+    @Test
+    @DisplayName("Amount with satang")
+    void testBahtAndSatang() {
+        assertThat(ThaiAmountWordsConverter.toWords(new BigDecimal("100.50")))
+                .contains("บาท")
+                .contains("สตางค์")
+                .doesNotContain("ถ้วน");
+    }
+
+    @Test
+    @DisplayName("Negative amount throws IllegalArgumentException")
+    void testNegativeThrows() {
+        assertThatThrownBy(() -> ThaiAmountWordsConverter.toWords(new BigDecimal("-1")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("Null amount throws IllegalArgumentException")
+    void testNullThrows() {
+        assertThatThrownBy(() -> ThaiAmountWordsConverter.toWords(null))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("Large amount with ล้าน (million)")
+    void testMillionAmount() {
+        String result = ThaiAmountWordsConverter.toWords(new BigDecimal("198628"));
+        assertThat(result).contains("ล้าน");
+    }
+}
+```
+
+- [ ] **Step 9: Run all new tests**
+
+```bash
+cd /home/wpanther/projects/etax/invoice-microservices/services/abbreviatedtaxinvoice-pdf-generation-service
+mvn test -Dtest="AbbreviatedTaxInvoicePdfDocumentTest,AbbreviatedTaxInvoicePdfGenerationExceptionTest,PdfGenerationConstantsTest,AbbreviatedTaxInvoicePdfDocumentRepositoryAdapterTest,EventPublisherTest,SagaReplyPublisherTest,AbbreviatedTaxInvoicePdfGenerationServiceImplTest,ThaiAmountWordsConverterTest" 2>&1 | tail -15
+```
+
+Expected: `BUILD SUCCESS`.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add src/
+git commit -m "feat: add remaining domain, persistence, messaging, and PDF service tests"
+```
+
+---
+
+## Task 17: Full Compile + Test Suite Verification + PDF Preview Test
+
+**Files:**
+- Create: `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/PdfPreviewTest.java`
+- Create: `src/test/resources/xml/preview-abbreviatedtaxinvoice.xml`
+
+- [ ] **Step 1: Create preview XML fixture**
+
+Create `src/test/resources/xml/preview-abbreviatedtaxinvoice.xml` using a realistic AbbreviatedTaxInvoice document (seller-only, no buyer):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<rsm:AbbreviatedTaxInvoice_CrossIndustryInvoice
+    xmlns:ram="urn:etda:uncefact:data:standard:AbbreviatedTaxInvoice_ReusableAggregateBusinessInformationEntity:2"
+    xmlns:rsm="urn:etda:uncefact:data:standard:AbbreviatedTaxInvoice_CrossIndustryInvoice:2">
+  <rsm:ExchangedDocument>
+    <ram:ID>ATINV-2568-0042</ram:ID>
+    <ram:Name>ใบกำกับภาษีอย่างย่อ</ram:Name>
+    <ram:TypeCode>T05</ram:TypeCode>
+    <ram:IssueDateTime>2025-06-15T10:30:00.0</ram:IssueDateTime>
+  </rsm:ExchangedDocument>
+  <rsm:SupplyChainTradeTransaction>
+    <ram:ApplicableHeaderTradeAgreement>
+      <ram:SellerTradeParty>
+        <ram:Name>บริษัท ตัวอย่าง จำกัด</ram:Name>
+        <ram:SpecifiedTaxRegistration>
+          <ram:ID>0123456789012</ram:ID>
+        </ram:SpecifiedTaxRegistration>
+        <ram:PostalTradeAddress>
+          <ram:LineOne>123 ถนนสุขุมวิท</ram:LineOne>
+          <ram:CityName>กรุงเทพมหานคร</ram:CityName>
+          <ram:PostcodeCode>10110</ram:PostcodeCode>
+        </ram:PostalTradeAddress>
+      </ram:SellerTradeParty>
+    </ram:ApplicableHeaderTradeAgreement>
+    <ram:ApplicableHeaderTradeDelivery/>
+    <ram:ApplicableHeaderTradeSettlement>
+      <ram:InvoiceCurrencyCode>THB</ram:InvoiceCurrencyCode>
+      <ram:ApplicableTradeTax>
+        <ram:TypeCode>VAT</ram:TypeCode>
+        <ram:CalculatedRate>7</ram:CalculatedRate>
+      </ram:ApplicableTradeTax>
+      <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+        <ram:LineTotalAmount>5000.00</ram:LineTotalAmount>
+        <ram:AllowanceTotalAmount>0.00</ram:AllowanceTotalAmount>
+        <ram:TaxBasisTotalAmount>5000.00</ram:TaxBasisTotalAmount>
+        <ram:TaxTotalAmount>350.00</ram:TaxTotalAmount>
+        <ram:GrandTotalAmount>5350.00</ram:GrandTotalAmount>
+      </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+    </ram:ApplicableHeaderTradeSettlement>
+    <ram:IncludedSupplyChainTradeLineItem>
+      <ram:AssociatedDocumentLineDocument>
+        <ram:LineID>1</ram:LineID>
+      </ram:AssociatedDocumentLineDocument>
+      <ram:SpecifiedTradeProduct>
+        <ram:ID>P001</ram:ID>
+        <ram:Name>สินค้าตัวอย่าง</ram:Name>
+      </ram:SpecifiedTradeProduct>
+      <ram:SpecifiedLineTradeAgreement>
+        <ram:GrossPriceProductTradePrice>
+          <ram:ChargeAmount>5000.00</ram:ChargeAmount>
+        </ram:GrossPriceProductTradePrice>
+      </ram:SpecifiedLineTradeAgreement>
+      <ram:SpecifiedLineTradeDelivery>
+        <ram:BilledQuantity unitCode="PIECE">1</ram:BilledQuantity>
+      </ram:SpecifiedLineTradeDelivery>
+      <ram:SpecifiedLineTradeSettlement>
+        <ram:ApplicableTradeTax>
+          <ram:TypeCode>VAT</ram:TypeCode>
+          <ram:CalculatedRate>7</ram:CalculatedRate>
+        </ram:ApplicableTradeTax>
+        <ram:SpecifiedTradeSettlementLineMonetarySummation>
+          <ram:NetLineTotalAmount>5000.00</ram:NetLineTotalAmount>
+        </ram:SpecifiedTradeSettlementLineMonetarySummation>
+      </ram:SpecifiedLineTradeSettlement>
+    </ram:IncludedSupplyChainTradeLineItem>
+  </rsm:SupplyChainTradeTransaction>
+</rsm:AbbreviatedTaxInvoice_CrossIndustryInvoice>
+```
+
+- [ ] **Step 2: Create `PdfPreviewTest`**
+
+Create `src/test/java/com/wpanther/abbreviatedtaxinvoice/pdf/PdfPreviewTest.java`:
+
+```java
+package com.wpanther.abbreviatedtaxinvoice.pdf;
+
+import com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.pdf.PdfA3Converter;
+import com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.pdf.ThaiAmountWordsConverter;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.apache.fop.apps.FopFactory;
+import org.apache.fop.apps.MimeConstants;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.core.io.ClassPathResource;
+
+import javax.xml.transform.Result;
+import javax.xml.transform.Source;
+import javax.xml.transform.Templates;
+import javax.xml.transform.Transformer;
+import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.sax.SAXResult;
+import javax.xml.transform.stream.StreamSource;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+@DisplayName("PDF/A-3 Preview Generator")
+class PdfPreviewTest {
+
+    private static final Path OUTPUT_DIR = Path.of("target/preview");
+    private static final BigDecimal GRAND_TOTAL = new BigDecimal("5350.00");
+    private static final String DOC_NUMBER = "ATINV-2568-0042";
+
+    private static String signedXml;
+    private static SimpleMeterRegistry registry;
+
+    @BeforeAll
+    static void loadFixtures() throws Exception {
+        ClassPathResource xmlResource = new ClassPathResource("xml/preview-abbreviatedtaxinvoice.xml");
+        try (InputStream is = xmlResource.getInputStream()) {
+            signedXml = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        Files.createDirectories(OUTPUT_DIR);
+        registry = new SimpleMeterRegistry();
+    }
+
+    @Test
+    @DisplayName("Full pipeline: signed XML → FOP → PDF/A-3 with embedded XML")
+    void generatePdfA3Preview() throws Exception {
+        String amountInWords = ThaiAmountWordsConverter.toWords(GRAND_TOTAL);
+        assertThat(amountInWords).isEqualTo("ห้าพันสามร้อยห้าสิบบาทถ้วน");
+
+        // Step 1: Render base PDF
+        byte[] basePdf = renderBasePdf(amountInWords);
+        assertThat(basePdf).isNotEmpty();
+        assertStartsWithPdfHeader(basePdf);
+
+        // Step 2: Convert to PDF/A-3 with embedded signed XML
+        PdfA3Converter converter = new PdfA3Converter("icc/sRGB.icc", registry);
+        String xmlFilename = "abbreviated-tax-invoice-" + DOC_NUMBER + ".xml";
+        byte[] pdfA3 = converter.convertToPdfA3(basePdf, signedXml, xmlFilename, DOC_NUMBER);
+
+        assertThat(pdfA3).isNotEmpty();
+        assertThat(pdfA3.length).isGreaterThan(basePdf.length);
+        assertStartsWithPdfHeader(pdfA3);
+
+        // Save for visual inspection
+        Path outputPath = OUTPUT_DIR.resolve("abbreviated-tax-invoice-pdfa3-preview.pdf");
+        Files.write(outputPath, pdfA3);
+        System.out.println("PDF/A-3 saved: " + outputPath.toAbsolutePath() + " (" + pdfA3.length + " bytes)");
+    }
+
+    private byte[] renderBasePdf(String amountInWords) throws Exception {
+        FopFactory fopFactory = createProductionFopFactory();
+        Templates templates = compileTemplates();
+
+        try (ByteArrayOutputStream pdfOutput = new ByteArrayOutputStream()) {
+            var fop = fopFactory.newFop(MimeConstants.MIME_PDF, pdfOutput);
+            Transformer transformer = templates.newTransformer();
+            transformer.setParameter("amountInWords", amountInWords);
+
+            Source xmlSource = new StreamSource(
+                    new ByteArrayInputStream(signedXml.getBytes(StandardCharsets.UTF_8)));
+            Result result = new SAXResult(fop.getDefaultHandler());
+            transformer.transform(xmlSource, result);
+
+            return pdfOutput.toByteArray();
+        }
+    }
+
+    private FopFactory createProductionFopFactory() throws Exception {
+        Path projectRoot = Path.of("").toAbsolutePath();
+        Path prodConfig = projectRoot.resolve("src/main/resources/fop/fop.xconf");
+        try (InputStream is = Files.newInputStream(prodConfig)) {
+            return FopFactory.newInstance(prodConfig.getParent().toUri(), is);
+        }
+    }
+
+    private Templates compileTemplates() throws Exception {
+        ClassPathResource xslResource =
+                new ClassPathResource("xsl/abbreviatedtaxinvoice-direct.xsl");
+        try (InputStream is = xslResource.getInputStream()) {
+            return TransformerFactory.newInstance().newTemplates(new StreamSource(is));
+        }
+    }
+
+    private static void assertStartsWithPdfHeader(byte[] pdfBytes) {
+        assertThat(new String(pdfBytes, 0, 4, StandardCharsets.US_ASCII))
+                .isEqualTo("%PDF");
+    }
+}
+```
+
+- [ ] **Step 3: Run PDF preview test**
+
+```bash
+cd /home/wpanther/projects/etax/invoice-microservices/services/abbreviatedtaxinvoice-pdf-generation-service
+mvn test -Dtest="PdfPreviewTest" 2>&1 | tail -10
+```
+
+Expected: `BUILD SUCCESS`. The PDF is saved to `target/preview/abbreviated-tax-invoice-pdfa3-preview.pdf` for visual inspection.
+
+- [ ] **Step 4: Run full test suite with coverage**
+
+```bash
+mvn verify 2>&1 | tail -25
+```
+
+Expected: `BUILD SUCCESS` with all tests passing and JaCoCo coverage ≥ 90% per package.
+
+If JaCoCo fails on a specific package, check the HTML report at `target/site/jacoco/index.html` and add tests for uncovered branches.
+
+- [ ] **Step 5: Final full compile**
+
+```bash
+mvn compile -DskipTests 2>&1 | tail -5
+```
+
+Expected: `BUILD SUCCESS`.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/
+git commit -m "feat: add PDF preview test and XML fixture; full test suite verification"
+```
+
+---
+
+## Implementation Plan — Complete
+
+All 17 tasks cover the full service implementation:
+
+| Task | Description |
+|------|-------------|
+| 1 | Saga Commons — `GENERATE_ABBREVIATED_TAX_INVOICE_PDF` enum |
+| 2 | Maven project scaffold — `pom.xml` + main application class |
+| 3 | Domain layer — exception, constants, `GenerationStatus`, repository/service interfaces |
+| 4 | Domain model — `AbbreviatedTaxInvoicePdfDocument` aggregate root |
+| 5 | Application ports + use case interfaces |
+| 6 | Infrastructure persistence — entity, JPA repository, adapter |
+| 7 | Infrastructure persistence — outbox + Flyway migration |
+| 8 | Infrastructure messaging — events + publishers |
+| 9 | Kafka commands, mapper, and Camel route config |
+| 10 | Configuration classes + metrics |
+| 11 | PDF infrastructure — FOP generator, PDF/A-3 converter, amount words, service impl |
+| 12 | XSL-FO template + FOP/ICC/font resources |
+| 13 | MinIO storage adapter + cleanup service |
+| 14 | REST client + application services (DocumentService + SagaCommandHandler) |
+| 15 | `application.yml` + test config + Camel route serialization tests + command mapper tests |
+| 16 | Remaining domain/persistence/messaging/PDF tests |
+| 17 | Full compile + test suite verification + PDF preview test |
