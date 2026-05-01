@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wpanther.abbreviatedtaxinvoice.pdf.application.port.in.CompensateAbbreviatedTaxInvoicePdfUseCase;
 import com.wpanther.abbreviatedtaxinvoice.pdf.application.port.in.ProcessAbbreviatedTaxInvoicePdfUseCase;
-import com.wpanther.abbreviatedtaxinvoice.pdf.application.service.SagaCommandHandler;
+import com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.in.kafka.SagaCommandHandler;
 import com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.in.kafka.dto.CompensateAbbreviatedTaxInvoicePdfCommand;
 import com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.in.kafka.dto.ProcessAbbreviatedTaxInvoicePdfCommand;
 import com.wpanther.saga.domain.enums.SagaStep;
@@ -130,7 +130,7 @@ public class SagaRouteConfig extends RouteBuilder {
                     ? b : body.toString().getBytes(StandardCharsets.UTF_8);
             JsonNode node = objectMapper.readTree(rawBytes);
             String sagaId = node.path("sagaId").asText(null);
-            String sagaStepStr = node.path("sajaStep").asText(null);
+            String sagaStepStr = node.path("sagaStep").asText(null);
             String correlationId = node.path("correlationId").asText(null);
             if (sagaId == null || sagaStepStr == null) {
                 log.error("DLQ: saga metadata missing in raw message — orchestrator must timeout");

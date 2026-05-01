@@ -1,5 +1,8 @@
 package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.out.messaging;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.wpanther.saga.domain.enums.SagaStep;
+import com.wpanther.saga.infrastructure.outbox.OutboxService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -7,10 +10,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.wpanther.saga.domain.enums.ReplyStatus;
-import com.wpanther.saga.domain.enums.SagaStep;
-import com.wpanther.saga.infrastructure.outbox.OutboxService;
+import com.wpanther.saga.domain.model.SagaReply;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -36,7 +36,7 @@ class SagaReplyPublisherTest {
         publisher.publishSuccess("saga-123", SagaStep.GENERATE_ABBREVIATED_TAX_INVOICE_PDF,
                 "corr-456", "http://example.com/doc.pdf", 1024L);
 
-        ArgumentCaptor<com.wpanther.saga.domain.model.IntegrationEvent> eventCaptor = ArgumentCaptor.forClass(com.wpanther.saga.domain.model.IntegrationEvent.class);
+        ArgumentCaptor<SagaReply> eventCaptor = ArgumentCaptor.forClass(SagaReply.class);
         verify(outboxService).saveWithRouting(
                 eventCaptor.capture(),
                 eq("AbbreviatedTaxInvoicePdfDocument"),
@@ -46,10 +46,9 @@ class SagaReplyPublisherTest {
                 any()
         );
 
-        AbbreviatedTaxInvoicePdfReplyEvent replyEvent = (AbbreviatedTaxInvoicePdfReplyEvent) eventCaptor.getValue();
-        assertThat(replyEvent.isSuccess()).isTrue();
-        assertThat(replyEvent.getPdfUrl()).isEqualTo("http://example.com/doc.pdf");
-        assertThat(replyEvent.getPdfSize()).isEqualTo(1024L);
+        SagaReply reply = eventCaptor.getValue();
+        assertThat(reply.getStatus().name()).isEqualTo("SUCCESS");
+        assertThat(reply.getEventType()).isEqualTo("saga.reply.abbreviated-tax-invoice-pdf");
     }
 
     @Test
@@ -58,7 +57,7 @@ class SagaReplyPublisherTest {
         publisher.publishFailure("saga-123", SagaStep.GENERATE_ABBREVIATED_TAX_INVOICE_PDF,
                 "corr-456", "Something went wrong");
 
-        ArgumentCaptor<com.wpanther.saga.domain.model.IntegrationEvent> eventCaptor = ArgumentCaptor.forClass(com.wpanther.saga.domain.model.IntegrationEvent.class);
+        ArgumentCaptor<SagaReply> eventCaptor = ArgumentCaptor.forClass(SagaReply.class);
         verify(outboxService).saveWithRouting(
                 eventCaptor.capture(),
                 eq("AbbreviatedTaxInvoicePdfDocument"),
@@ -68,9 +67,8 @@ class SagaReplyPublisherTest {
                 any()
         );
 
-        AbbreviatedTaxInvoicePdfReplyEvent failureEvent = (AbbreviatedTaxInvoicePdfReplyEvent) eventCaptor.getValue();
-        assertThat(failureEvent.isFailure()).isTrue();
-        assertThat(failureEvent.getErrorMessage()).isEqualTo("Something went wrong");
+        SagaReply reply = eventCaptor.getValue();
+        assertThat(reply.getStatus().name()).isEqualTo("FAILURE");
     }
 
     @Test
@@ -78,7 +76,7 @@ class SagaReplyPublisherTest {
     void testPublishCompensated() {
         publisher.publishCompensated("saga-123", SagaStep.GENERATE_ABBREVIATED_TAX_INVOICE_PDF, "corr-456");
 
-        ArgumentCaptor<com.wpanther.saga.domain.model.IntegrationEvent> eventCaptor = ArgumentCaptor.forClass(com.wpanther.saga.domain.model.IntegrationEvent.class);
+        ArgumentCaptor<SagaReply> eventCaptor = ArgumentCaptor.forClass(SagaReply.class);
         verify(outboxService).saveWithRouting(
                 eventCaptor.capture(),
                 eq("AbbreviatedTaxInvoicePdfDocument"),
@@ -88,7 +86,7 @@ class SagaReplyPublisherTest {
                 any()
         );
 
-        AbbreviatedTaxInvoicePdfReplyEvent compensatedEvent = (AbbreviatedTaxInvoicePdfReplyEvent) eventCaptor.getValue();
-        assertThat(compensatedEvent.isCompensated()).isTrue();
+        SagaReply reply = eventCaptor.getValue();
+        assertThat(reply.getStatus().name()).isEqualTo("COMPENSATED");
     }
 }
