@@ -37,9 +37,9 @@ public class ProcessAbbreviatedTaxInvoicePdfCommand extends SagaCommand {
             @JsonProperty("documentNumber") String documentNumber,
             @JsonProperty("signedXmlUrl") String signedXmlUrl) {
         super(eventId, occurredAt, eventType, version, sagaId, sagaStep, correlationId);
-        this.documentId = documentId;
-        this.documentNumber = documentNumber;
-        this.signedXmlUrl = signedXmlUrl;
+        this.documentId = Objects.requireNonNull(documentId, "documentId is required");
+        this.documentNumber = Objects.requireNonNull(documentNumber, "documentNumber is required");
+        this.signedXmlUrl = Objects.requireNonNull(signedXmlUrl, "signedXmlUrl is required");
     }
 
     public ProcessAbbreviatedTaxInvoicePdfCommand(String sagaId, SagaStep sagaStep, String correlationId,
