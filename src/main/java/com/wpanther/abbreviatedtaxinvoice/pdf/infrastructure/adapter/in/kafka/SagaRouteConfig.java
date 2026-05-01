@@ -2,12 +2,15 @@ package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.in.kafka;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.wpanther.abbreviatedtaxinvoice.pdf.application.port.in.CompensateAbbreviatedTaxInvoicePdfUseCase;
+import com.wpanther.abbreviatedtaxinvoice.pdf.application.port.in.ProcessAbbreviatedTaxInvoicePdfUseCase;
 import com.wpanther.abbreviatedtaxinvoice.pdf.application.service.SagaCommandHandler;
-import com.wpanther.abbreviatedtaxinvoice.pdf.application.usecase.CompensateAbbreviatedTaxInvoicePdfUseCase;
-import com.wpanther.abbreviatedtaxinvoice.pdf.application.usecase.ProcessAbbreviatedTaxInvoicePdfUseCase;
+import com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.in.kafka.dto.CompensateAbbreviatedTaxInvoicePdfCommand;
+import com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.in.kafka.dto.ProcessAbbreviatedTaxInvoicePdfCommand;
 import com.wpanther.saga.domain.enums.SagaStep;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.camel.Exchange;
+import org.apache.camel.LoggingLevel;
 import org.apache.camel.builder.RouteBuilder;
 import org.apache.camel.model.dataformat.JsonLibrary;
 import org.springframework.stereotype.Component;
@@ -48,14 +51,17 @@ public class SagaRouteConfig extends RouteBuilder {
                         .onPrepareFailure(exchange -> {
                             Throwable cause = exchange.getProperty(Exchange.EXCEPTION_CAUGHT, Throwable.class);
                             Object body = exchange.getIn().getBody();
-                            if (body instanceof KafkaAbbreviatedTaxInvoiceProcessCommand cmd) {
+                            if (body instanceof ProcessAbbreviatedTaxInvoicePdfCommand cmd) {
                                 log.error("DLQ: notifying orchestrator of retry exhaustion for saga {} document {}",
                                         cmd.getSagaId(), cmd.getDocumentNumber());
-                                sagaCommandHandler.publishOrchestrationFailure(cmd, cause);
-                            } else if (body instanceof KafkaAbbreviatedTaxInvoiceCompensateCommand cmd) {
-                                log.error("DLQ: notifying orchestrator of compensation retry exhaustion for saga {}",
-                                        cmd.getSagaId());
-                                sagaCommandHandler.publishCompensationOrchestrationFailure(cmd, cause);
+                                sagaCommandHandler.publishOrchestrationFailure(
+                                        cmd.getSagaId(), cmd.getCorrelationId(),
+                                        cmd.getDocumentId(), cmd.getDocumentNumber(), cause);
+                            } else if (body instanceof CompensateAbbreviatedTaxInvoicePdfCommand cmd) {
+                                log.error("DLQ: notifying orchestrator of compensation retry exhaustion for saga {} document {}",
+                                        cmd.getSagaId(), cmd.getDocumentId());
+                                sagaCommandHandler.publishCompensationOrchestrationFailure(
+                                        cmd.getSagaId(), cmd.getCorrelationId(), cmd.getDocumentId(), cause);
                             } else {
                                 log.error("DLQ: body not deserialized ({}); attempting saga metadata recovery",
                                         body == null ? "null" : body.getClass().getSimpleName());
@@ -72,13 +78,20 @@ public class SagaRouteConfig extends RouteBuilder {
                         + "&maxPollRecords={{app.kafka.consumer.max-poll-records:100}}"
                         + "&consumersCount={{app.kafka.consumer.consumers-count:3}}")
                 .routeId("saga-command-consumer")
-                .unmarshal().json(JsonLibrary.Jackson, KafkaAbbreviatedTaxInvoiceProcessCommand.class)
+                .log(LoggingLevel.DEBUG, "Received saga command from Kafka: partition=${header[kafka.PARTITION]}, offset=${header[kafka.OFFSET]}")
+                .unmarshal().json(JsonLibrary.Jackson, ProcessAbbreviatedTaxInvoicePdfCommand.class)
                 .process(exchange -> {
-                    KafkaAbbreviatedTaxInvoiceProcessCommand cmd =
-                            exchange.getIn().getBody(KafkaAbbreviatedTaxInvoiceProcessCommand.class);
+                    ProcessAbbreviatedTaxInvoicePdfCommand cmd =
+                            exchange.getIn().getBody(ProcessAbbreviatedTaxInvoicePdfCommand.class);
                     log.info("Processing saga command for saga: {}, document: {}",
                             cmd.getSagaId(), cmd.getDocumentNumber());
-                    processUseCase.handle(cmd);
+                    processUseCase.handle(
+                            cmd.getDocumentId(),
+                            cmd.getDocumentNumber(),
+                            cmd.getSignedXmlUrl(),
+                            cmd.getSagaId(),
+                            cmd.getSagaStep(),
+                            cmd.getCorrelationId());
                 })
                 .log("Successfully processed saga command");
 
@@ -91,13 +104,18 @@ public class SagaRouteConfig extends RouteBuilder {
                         + "&maxPollRecords={{app.kafka.consumer.max-poll-records:100}}"
                         + "&consumersCount={{app.kafka.consumer.consumers-count:3}}")
                 .routeId("saga-compensation-consumer")
-                .unmarshal().json(JsonLibrary.Jackson, KafkaAbbreviatedTaxInvoiceCompensateCommand.class)
+                .log(LoggingLevel.DEBUG, "Received compensation command from Kafka: partition=${header[kafka.PARTITION]}, offset=${header[kafka.OFFSET]}")
+                .unmarshal().json(JsonLibrary.Jackson, CompensateAbbreviatedTaxInvoicePdfCommand.class)
                 .process(exchange -> {
-                    KafkaAbbreviatedTaxInvoiceCompensateCommand cmd =
-                            exchange.getIn().getBody(KafkaAbbreviatedTaxInvoiceCompensateCommand.class);
+                    CompensateAbbreviatedTaxInvoicePdfCommand cmd =
+                            exchange.getIn().getBody(CompensateAbbreviatedTaxInvoicePdfCommand.class);
                     log.info("Processing compensation for saga: {}, document: {}",
                             cmd.getSagaId(), cmd.getDocumentId());
-                    compensateUseCase.handle(cmd);
+                    compensateUseCase.handle(
+                            cmd.getDocumentId(),
+                            cmd.getSagaId(),
+                            cmd.getSagaStep(),
+                            cmd.getCorrelationId());
                 })
                 .log("Successfully processed compensation command");
     }
@@ -112,7 +130,7 @@ public class SagaRouteConfig extends RouteBuilder {
                     ? b : body.toString().getBytes(StandardCharsets.UTF_8);
             JsonNode node = objectMapper.readTree(rawBytes);
             String sagaId = node.path("sagaId").asText(null);
-            String sagaStepStr = node.path("sagaStep").asText(null);
+            String sagaStepStr = node.path("sajaStep").asText(null);
             String correlationId = node.path("correlationId").asText(null);
             if (sagaId == null || sagaStepStr == null) {
                 log.error("DLQ: saga metadata missing in raw message — orchestrator must timeout");
