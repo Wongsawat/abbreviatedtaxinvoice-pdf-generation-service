@@ -27,7 +27,7 @@ class SagaReplyPublisherTest {
 
     @BeforeEach
     void setUp() {
-        publisher = new SagaReplyPublisher(outboxService, new ObjectMapper());
+        publisher = new SagaReplyPublisher(outboxService, new ObjectMapper(), "saga.reply.abbreviated-tax-invoice-pdf");
     }
 
     @Test

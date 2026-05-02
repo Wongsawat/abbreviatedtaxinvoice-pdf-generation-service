@@ -7,6 +7,7 @@ import com.wpanther.saga.domain.model.SagaReply;
 import com.wpanther.saga.infrastructure.outbox.OutboxService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,28 +19,31 @@ public class SagaReplyPublisher implements com.wpanther.abbreviatedtaxinvoice.pd
 
     private final OutboxService outboxService;
     private final ObjectMapper objectMapper;
+    private final String replyTopic;
 
-    public SagaReplyPublisher(OutboxService outboxService, ObjectMapper objectMapper) {
+    public SagaReplyPublisher(OutboxService outboxService, ObjectMapper objectMapper,
+            @Value("${app.kafka.topics.saga-reply-abbreviated-tax-invoice-pdf:saga.reply.abbreviated-tax-invoice-pdf}") String replyTopic) {
         this.outboxService = outboxService;
         this.objectMapper = objectMapper;
+        this.replyTopic = replyTopic;
     }
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public void publishSuccess(String sagaId, SagaStep sagaStep, String correlationId, String pdfUrl, long pdfSize) {
-        publish(AbbreviatedTaxInvoicePdfReplyEvent.success(sagaId, sagaStep, correlationId, pdfUrl, pdfSize), sagaId);
+        publish(AbbreviatedTaxInvoicePdfReplyEvent.success(sagaId, sagaStep, correlationId, pdfUrl, pdfSize, replyTopic), sagaId);
     }
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public void publishFailure(String sagaId, SagaStep sagaStep, String correlationId, String errorMessage) {
-        publish(AbbreviatedTaxInvoicePdfReplyEvent.failure(sagaId, sagaStep, correlationId, errorMessage), sagaId);
+        publish(AbbreviatedTaxInvoicePdfReplyEvent.failure(sagaId, sagaStep, correlationId, errorMessage, replyTopic), sagaId);
     }
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public void publishCompensated(String sagaId, SagaStep sagaStep, String correlationId) {
-        publish(AbbreviatedTaxInvoicePdfReplyEvent.compensated(sagaId, sagaStep, correlationId), sagaId);
+        publish(AbbreviatedTaxInvoicePdfReplyEvent.compensated(sagaId, sagaStep, correlationId, replyTopic), sagaId);
     }
 
     private void publish(AbbreviatedTaxInvoicePdfReplyEvent event, String sagaId) {
@@ -48,7 +52,7 @@ public class SagaReplyPublisher implements com.wpanther.abbreviatedtaxinvoice.pd
                     event,
                     OutboxConstants.AGGREGATE_TYPE,
                     sagaId,
-                    OutboxConstants.TOPIC_SAGA_REPLY,
+                    replyTopic,
                     sagaId,
                     "{}"
             );
@@ -66,6 +70,7 @@ public class SagaReplyPublisher implements com.wpanther.abbreviatedtaxinvoice.pd
         private final String pdfUrl;
         private final Long pdfSize;
         private final String errorMessage;
+        private final String eventType;
 
         private AbbreviatedTaxInvoicePdfReplyEvent(
                 String sagaId,
@@ -74,41 +79,36 @@ public class SagaReplyPublisher implements com.wpanther.abbreviatedtaxinvoice.pd
                 ReplyStatus replyStatus,
                 String pdfUrl,
                 Long pdfSize,
-                String errorMessage) {
+                String errorMessage,
+                String eventType) {
             super(sagaId, sagaStep, correlationId, replyStatus);
             this.pdfUrl = pdfUrl;
             this.pdfSize = pdfSize;
             this.errorMessage = errorMessage;
-        }
-
-        private AbbreviatedTaxInvoicePdfReplyEvent(String sagaId, SagaStep sagaStep, String correlationId, String errorMessage) {
-            super(sagaId, sagaStep, correlationId, ReplyStatus.FAILURE);
-            this.pdfUrl = null;
-            this.pdfSize = null;
-            this.errorMessage = errorMessage;
+            this.eventType = eventType;
         }
 
         public static AbbreviatedTaxInvoicePdfReplyEvent success(
-                String sagaId, SagaStep sagaStep, String correlationId, String pdfUrl, Long pdfSize) {
+                String sagaId, SagaStep sagaStep, String correlationId, String pdfUrl, Long pdfSize, String eventType) {
             return new AbbreviatedTaxInvoicePdfReplyEvent(
-                    sagaId, sagaStep, correlationId, ReplyStatus.SUCCESS, pdfUrl, pdfSize, null);
+                    sagaId, sagaStep, correlationId, ReplyStatus.SUCCESS, pdfUrl, pdfSize, null, eventType);
         }
 
         public static AbbreviatedTaxInvoicePdfReplyEvent failure(
-                String sagaId, SagaStep sagaStep, String correlationId, String errorMessage) {
+                String sagaId, SagaStep sagaStep, String correlationId, String errorMessage, String eventType) {
             return new AbbreviatedTaxInvoicePdfReplyEvent(
-                    sagaId, sagaStep, correlationId, errorMessage);
+                    sagaId, sagaStep, correlationId, ReplyStatus.FAILURE, null, null, errorMessage, eventType);
         }
 
         public static AbbreviatedTaxInvoicePdfReplyEvent compensated(
-                String sagaId, SagaStep sagaStep, String correlationId) {
+                String sagaId, SagaStep sagaStep, String correlationId, String eventType) {
             return new AbbreviatedTaxInvoicePdfReplyEvent(
-                    sagaId, sagaStep, correlationId, ReplyStatus.COMPENSATED, null, null, null);
+                    sagaId, sagaStep, correlationId, ReplyStatus.COMPENSATED, null, null, null, eventType);
         }
 
         @Override
         public String getEventType() {
-            return "saga.reply.abbreviated-tax-invoice-pdf";
+            return this.eventType;
         }
 
         public boolean isSuccess() { return ReplyStatus.SUCCESS.equals(getStatus()); }
