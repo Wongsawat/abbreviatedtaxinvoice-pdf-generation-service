@@ -1,7 +1,9 @@
 package com.wpanther.abbreviatedtaxinvoice.pdf.infrastructure.adapter.in.kafka;
 
+import com.wpanther.abbreviatedtaxinvoice.pdf.application.dto.event.DocumentArchiveEvent;
 import com.wpanther.abbreviatedtaxinvoice.pdf.application.port.in.CompensateAbbreviatedTaxInvoicePdfUseCase;
 import com.wpanther.abbreviatedtaxinvoice.pdf.application.port.in.ProcessAbbreviatedTaxInvoicePdfUseCase;
+import com.wpanther.abbreviatedtaxinvoice.pdf.application.port.out.DocumentArchivePort;
 import com.wpanther.abbreviatedtaxinvoice.pdf.application.port.out.PdfEventPort;
 import com.wpanther.abbreviatedtaxinvoice.pdf.application.port.out.PdfStoragePort;
 import com.wpanther.abbreviatedtaxinvoice.pdf.application.port.out.SagaReplyPort;
@@ -28,6 +30,7 @@ public class SagaCommandHandler implements ProcessAbbreviatedTaxInvoicePdfUseCas
     private final SignedXmlFetchPort signedXmlFetchPort;
     private final PdfStoragePort pdfStoragePort;
     private final PdfEventPort pdfEventPort;
+    private final DocumentArchivePort documentArchivePort;
     private final SagaReplyPort sagaReplyPort;
     private final Counter successCounter;
     private final Counter failureCounter;
@@ -38,6 +41,7 @@ public class SagaCommandHandler implements ProcessAbbreviatedTaxInvoicePdfUseCas
             SignedXmlFetchPort signedXmlFetchPort,
             PdfStoragePort pdfStoragePort,
             PdfEventPort pdfEventPort,
+            DocumentArchivePort documentArchivePort,
             SagaReplyPort sagaReplyPort,
             MeterRegistry meterRegistry) {
         this.documentRepository = documentRepository;
@@ -45,6 +49,7 @@ public class SagaCommandHandler implements ProcessAbbreviatedTaxInvoicePdfUseCas
         this.signedXmlFetchPort = signedXmlFetchPort;
         this.pdfStoragePort = pdfStoragePort;
         this.pdfEventPort = pdfEventPort;
+        this.documentArchivePort = documentArchivePort;
         this.sagaReplyPort = sagaReplyPort;
         this.successCounter = meterRegistry.counter("pdf.generation.success");
         this.failureCounter = meterRegistry.counter("pdf.generation.failure");
@@ -83,6 +88,20 @@ public class SagaCommandHandler implements ProcessAbbreviatedTaxInvoicePdfUseCas
                     document.getAbbreviatedTaxInvoiceNumber(),
                     pdfUrl,
                     (long) pdfBytes.length
+            ));
+
+            // Emit document.archive for unsigned PDF archival
+            documentArchivePort.publish(new DocumentArchiveEvent(
+                    document.getAbbreviatedTaxInvoiceId(),
+                    document.getAbbreviatedTaxInvoiceNumber(),
+                    "ABBREVIATED_TAX_INVOICE",
+                    "UNSIGNED_PDF",
+                    pdfUrl,
+                    document.getAbbreviatedTaxInvoiceNumber() + ".pdf",
+                    "application/pdf",
+                    (long) pdfBytes.length,
+                    sagaId,
+                    correlationId
             ));
 
             sagaReplyPort.publishSuccess(
